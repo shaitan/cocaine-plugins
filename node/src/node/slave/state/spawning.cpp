@@ -21,7 +21,8 @@ using asio::ip::tcp;
 
 spawning_t::spawning_t(std::shared_ptr<state_machine_t> slave_) :
     slave(std::move(slave_)),
-    timer(slave->loop)
+    timer(slave->loop),
+    discarded(false)
 {}
 
 const char*
@@ -119,20 +120,38 @@ spawning_t::spawn(unsigned long timeout) {
     }
 }
 
+std::shared_ptr<control_t>
+spawning_t::activate(std::shared_ptr<session_t> session, upstream<io::worker::control_tag> stream) {
+    std::unique_lock<std::mutex> lock(mutex);
+    cv.wait(lock, [&]() -> bool {
+        return !!handshaking || discarded;
+    });
+
+    if (discarded) {
+        return nullptr;
+    }
+
+    return handshaking->activate(std::move(session), std::move(stream));
+}
+
 void
 spawning_t::on_spawn(std::chrono::high_resolution_clock::time_point start) {
+    const auto now = std::chrono::high_resolution_clock::now();
+    const auto elapsed = std::chrono::duration<float, std::chrono::milliseconds::period>(now - start).count();
+
     std::error_code ec;
     const size_t cancelled = timer.cancel(ec);
     if (ec || cancelled == 0) {
         // If we are here, then the spawn timer has been triggered and the slave has been
         // shutdowned with a spawn timeout error.
-        COCAINE_LOG_WARNING(slave->log, "slave has been spawned, but the timeout has already expired");
+        COCAINE_LOG_WARNING(slave->log, "slave has been spawned in {} ms, but the timeout has already expired",
+            elapsed);
         return;
     }
 
-    const auto now = std::chrono::high_resolution_clock::now();
-    COCAINE_LOG_DEBUG(slave->log, "slave has been spawned in {} ms",
-        std::chrono::duration<float, std::chrono::milliseconds::period>(now - start).count());
+    COCAINE_LOG_DEBUG(slave->log, "slave has been spawned in {} ms", elapsed);
+
+    // TODO: if already activated - continue activating.
 
     try {
         // May throw system error when failed to assign native descriptor to the fetcher.
@@ -140,10 +159,20 @@ spawning_t::on_spawn(std::chrono::high_resolution_clock::time_point start) {
         slave->migrate(handshaking);
 
         handshaking->start(slave->context.profile.timeout.handshake);
+
+        std::unique_lock<std::mutex> lock(mutex);
+        this->handshaking = handshaking;
+        lock.unlock();
+        cv.notify_one();
     } catch (const std::exception& err) {
         COCAINE_LOG_ERROR(slave->log, "unable to activate slave: {}", err.what());
 
-        slave->shutdown(error::unknown_activate_error);
+        slave->loop.post([=]() {
+            slave->shutdown(error::unknown_activate_error);
+        });
+
+        discarded = true;
+        cv.notify_one();
     }
 }
 
@@ -153,6 +182,9 @@ spawning_t::on_timeout(const std::error_code& ec) {
         COCAINE_LOG_DEBUG(slave->log, "spawn timer has called its completion handler: cancelled");
     } else {
         COCAINE_LOG_ERROR(slave->log, "unable to spawn slave: timeout");
+
+        discarded = true;
+        cv.notify_one();
 
         slave->shutdown(error::spawn_timeout);
     }

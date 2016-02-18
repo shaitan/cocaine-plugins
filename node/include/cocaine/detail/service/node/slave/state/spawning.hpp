@@ -3,6 +3,7 @@
 #include <asio/deadline_timer.hpp>
 
 #include "state.hpp"
+#include "handshaking.hpp"
 
 namespace cocaine {
 
@@ -21,6 +22,11 @@ class spawning_t:
     asio::deadline_timer timer;
     std::unique_ptr<api::handle_t> handle;
 
+    std::mutex mutex;
+    std::condition_variable cv;
+    std::atomic<bool> discarded;
+    std::shared_ptr<handshaking_t> handshaking;
+
 public:
     explicit
     spawning_t(std::shared_ptr<state_machine_t> slave);
@@ -32,6 +38,10 @@ public:
     virtual
     void
     cancel();
+
+    virtual
+    std::shared_ptr<control_t>
+    activate(std::shared_ptr<session_t> session, upstream<io::worker::control_tag> stream);
 
     virtual
     void
