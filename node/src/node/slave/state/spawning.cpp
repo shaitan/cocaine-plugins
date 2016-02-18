@@ -10,6 +10,7 @@
 
 #include "cocaine/service/node/slave.hpp"
 
+#include "cocaine/detail/service/node/slave/control.hpp"
 #include "cocaine/detail/service/node/slave/state/handshaking.hpp"
 #include "cocaine/detail/service/node/util.hpp"
 
@@ -21,8 +22,7 @@ using asio::ip::tcp;
 
 spawning_t::spawning_t(std::shared_ptr<state_machine_t> slave_) :
     slave(std::move(slave_)),
-    timer(slave->loop),
-    discarded(false)
+    timer(slave->loop)
 {}
 
 const char*
@@ -98,6 +98,7 @@ spawning_t::spawn(unsigned long timeout) {
         timer.expires_from_now(boost::posix_time::milliseconds(timeout));
         timer.async_wait(trace_t::bind(&spawning_t::on_timeout, shared_from_this(), ph::_1));
 
+        auto now = std::chrono::high_resolution_clock::now();
         handle = isolate->spawn(
             slave->context.manifest.executable,
             args,
@@ -108,9 +109,7 @@ spawning_t::spawn(unsigned long timeout) {
         // a callback function to the Isolate.
         // NOTE: The callback must be called from the event loop thread, otherwise the behavior
         // is undefined.
-        slave->loop.post(trace_t::bind(
-            &spawning_t::on_spawn, shared_from_this(), std::chrono::high_resolution_clock::now()
-        ));
+        slave->loop.post(trace_t::bind(&spawning_t::on_spawn, shared_from_this(), now));
     } catch(const std::system_error& err) {
         COCAINE_LOG_ERROR(slave->log, "unable to spawn slave: {}", err.code().message());
 
@@ -122,16 +121,17 @@ spawning_t::spawn(unsigned long timeout) {
 
 std::shared_ptr<control_t>
 spawning_t::activate(std::shared_ptr<session_t> session, upstream<io::worker::control_tag> stream) {
-    std::unique_lock<std::mutex> lock(mutex);
-    cv.wait(lock, [&]() -> bool {
-        return !!handshaking || discarded;
+    // If we are here, then an application has been spawned and started to work before isolate have
+    // been notified about it. Just create control dispatch to be able to handle heartbeats and save
+    // it for further usage.
+    auto control = data.apply([&](data_t& data) -> std::shared_ptr<control_t> {
+        data.session = session;
+        data.control = std::make_shared<control_t>(slave, std::move(stream));
+
+        return data.control;
     });
 
-    if (discarded) {
-        return nullptr;
-    }
-
-    return handshaking->activate(std::move(session), std::move(stream));
+    return control;
 }
 
 void
@@ -151,28 +151,26 @@ spawning_t::on_spawn(std::chrono::high_resolution_clock::time_point start) {
 
     COCAINE_LOG_DEBUG(slave->log, "slave has been spawned in {} ms", elapsed);
 
-    // TODO: if already activated - continue activating.
-
     try {
-        // May throw system error when failed to assign native descriptor to the fetcher.
-        auto handshaking = std::make_shared<handshaking_t>(slave, std::move(handle));
-        slave->migrate(handshaking);
+        data.apply([&](data_t& data) {
+            auto handshaking = std::make_shared<handshaking_t>(slave, std::move(handle));
+            // May throw system error when failed to assign native descriptor to the fetcher.
+            slave->migrate(handshaking);
 
-        handshaking->start(slave->context.profile.timeout.handshake);
-
-        std::unique_lock<std::mutex> lock(mutex);
-        this->handshaking = handshaking;
-        lock.unlock();
-        cv.notify_one();
+            if (data.control) {
+                // We've already received handshake frame and can immediately skip handshaking
+                // state.
+                handshaking->activate(data.session, data.control);
+            } else {
+                handshaking->start(slave->context.profile.timeout.handshake);
+            }
+        });
     } catch (const std::exception& err) {
         COCAINE_LOG_ERROR(slave->log, "unable to activate slave: {}", err.what());
 
         slave->loop.post([=]() {
             slave->shutdown(error::unknown_activate_error);
         });
-
-        discarded = true;
-        cv.notify_one();
     }
 }
 
@@ -182,9 +180,6 @@ spawning_t::on_timeout(const std::error_code& ec) {
         COCAINE_LOG_DEBUG(slave->log, "spawn timer has called its completion handler: cancelled");
     } else {
         COCAINE_LOG_ERROR(slave->log, "unable to spawn slave: timeout");
-
-        discarded = true;
-        cv.notify_one();
 
         slave->shutdown(error::spawn_timeout);
     }

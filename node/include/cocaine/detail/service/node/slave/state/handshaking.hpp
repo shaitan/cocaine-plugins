@@ -45,6 +45,9 @@ public:
     activate(std::shared_ptr<session_t> session, upstream<io::worker::control_tag> stream);
 
     void
+    activate(std::shared_ptr<session_t> session, std::shared_ptr<control_t> control);
+
+    void
     start(unsigned long timeout);
 
 private:

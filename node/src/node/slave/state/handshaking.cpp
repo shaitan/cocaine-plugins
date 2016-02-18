@@ -69,8 +69,7 @@ handshaking_t::activate(std::shared_ptr<session_t> session, upstream<io::worker:
 
     try {
         auto control = std::make_shared<control_t>(slave, std::move(stream));
-        auto active = std::make_shared<active_t>(slave, std::move(handle), std::move(session), control);
-        slave->migrate(active);
+        activate(std::move(session), control);
 
         return control;
     } catch (const std::exception& err) {
@@ -80,6 +79,12 @@ handshaking_t::activate(std::shared_ptr<session_t> session, upstream<io::worker:
     }
 
     return nullptr;
+}
+
+void
+handshaking_t::activate(std::shared_ptr<session_t> session, std::shared_ptr<control_t> control) {
+    auto active = std::make_shared<active_t>(slave, std::move(handle), std::move(session), control);
+    slave->migrate(active);
 }
 
 void

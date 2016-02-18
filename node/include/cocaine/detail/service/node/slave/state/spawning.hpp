@@ -22,10 +22,12 @@ class spawning_t:
     asio::deadline_timer timer;
     std::unique_ptr<api::handle_t> handle;
 
-    std::mutex mutex;
-    std::condition_variable cv;
-    std::atomic<bool> discarded;
-    std::shared_ptr<handshaking_t> handshaking;
+    struct data_t {
+        std::shared_ptr<session_t> session;
+        std::shared_ptr<control_t> control;
+    };
+
+    synchronized<data_t> data;
 
 public:
     explicit
