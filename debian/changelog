@@ -1,3 +1,12 @@
+cocaine-plugins (0.12.5.0-rc11) UNRELEASED; urgency=low
+
+  * Bug fix: workers should no longer be discarded if a handshake frame was
+    received while the slave's engine is in spawning state. This can be either
+    if the runtime is overloaded or applications spawns too fast.
+  * Bug fix: application engine now should properly count spawn duration.
+
+ -- Evgeny Safronov <division494@gmail.com>  Fri, 19 Feb 2016 17:00:51 +0300
+
 cocaine-plugins (0.12.5.0-rc10) unstable; urgency=low
 
   * Bug fix: Unicorn plugin will now use indexes in callback handler instead of
