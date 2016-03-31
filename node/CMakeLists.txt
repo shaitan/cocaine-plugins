@@ -4,7 +4,7 @@ find_package(Boost 1.46 COMPONENTS filesystem system thread REQUIRED)
 find_package(LibArchive REQUIRED)
 
 if(NOT APPLE)
-    option(COCAINE_ALLOW_CGROUPS "Build CGroups support for Process Isolate" ON)
+    option(COCAINE_ALLOW_CGROUPS "Build CGroups support for Process Isolate" OFF)
 else()
     option(COCAINE_ALLOW_CGROUPS "Build CGroups support for Process Isolate" OFF)
 endif()

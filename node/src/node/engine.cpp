@@ -537,12 +537,15 @@ auto engine_t::rebalance_events() -> void {
             return;
         }
 
-        COCAINE_LOG_DEBUG(log, "rebalancing events queue");
         queue.apply([&](queue_type& queue) {
-            std::set<std::string> inactive;
+            COCAINE_LOG_DEBUG(log, "rebalancing events queue, size: {}", queue.size());
 
-            while (!queue.empty()) {
-                auto& load = queue.front();
+            int attempt = 0;
+            auto it = queue.rbegin();
+            while (it != queue.rend()) {
+                auto& load = *it;
+
+                COCAINE_LOG_DEBUG(log, "rebalancing events queue, pos: {}", ++attempt);
 
                 // If we are dealing with tagged events we need to find an active slave with the
                 // specified id.
@@ -554,7 +557,8 @@ auto engine_t::rebalance_events() -> void {
                         } catch (const std::exception& err) {
                             COCAINE_LOG_WARNING(log, "failed to notify assignment failure: {}", err.what());
                         }
-                        return;
+                        it = queue_type::reverse_iterator(queue.erase(--it.base()));
+                        continue;
                     }
 
                     auto& slave = pool.at(load.id->id());
@@ -576,15 +580,9 @@ auto engine_t::rebalance_events() -> void {
                                 COCAINE_LOG_WARNING(log, "failed to notify assignment failure: {}", err.what());
                             }
                         }
-                        queue.pop_front();
+                        it = queue_type::reverse_iterator(queue.erase(--it.base()));
                     } else {
-                        inactive.insert(load.id->id());
-                        queue.push_back(load);
-                        queue.pop_front();
-                    }
-
-                    if (inactive.size() >= pool.size()) {
-                        return;
+                        it++;
                     }
                 } else {
                     const auto range = pool | boost::adaptors::map_values | filtered(filter);
@@ -605,7 +603,7 @@ auto engine_t::rebalance_events() -> void {
                         // The slave may become invalid and reject the assignment or reject for any
                         // other reasons. We pop the channel only on successful assignment to
                         // achieve strong exception guarantee.
-                        queue.pop_front();
+                        it = queue_type::reverse_iterator(queue.erase(--it.base()));
                     } catch (const std::exception& err) {
                         COCAINE_LOG_WARNING(log, "slave has rejected assignment: {}", err.what());
                     }
