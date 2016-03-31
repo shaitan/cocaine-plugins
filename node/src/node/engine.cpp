@@ -466,7 +466,8 @@ auto engine_t::despawn(const std::string& id, despawn_policy_t policy) -> void {
 
 auto engine_t::on_handshake(const std::string& id, std::shared_ptr<session_t> session,
                             upstream<io::worker::control_tag>&& stream)
-    -> std::shared_ptr<control_t> {
+    -> std::shared_ptr<control_t>
+{
     const blackhole::scope::holder_t scoped(*log, {{ "uuid", id }});
 
     COCAINE_LOG_DEBUG(log, "processing handshake message");
@@ -538,12 +539,24 @@ auto engine_t::rebalance_events() -> void {
 
         COCAINE_LOG_DEBUG(log, "rebalancing events queue");
         queue.apply([&](queue_type& queue) {
+            std::set<std::string> inactive;
+
             while (!queue.empty()) {
                 auto& load = queue.front();
 
                 // If we are dealing with tagged events we need to find an active slave with the
                 // specified id.
-                if (load.id && pool.count(load.id->id()) != 0) {
+                if (load.id) {
+                    if (pool.count(load.id->id()) == 0) {
+                        // Load for unregistered slave (maybe dead), drop and notify.
+                        try {
+                            load.downstream->error({}, error::invalid_assignment, "slave with specified id not found");
+                        } catch (const std::exception& err) {
+                            COCAINE_LOG_WARNING(log, "failed to notify assignment failure: {}", err.what());
+                        }
+                        return;
+                    }
+
                     auto& slave = pool.at(load.id->id());
 
                     if (filter(slave)) {
@@ -564,6 +577,14 @@ auto engine_t::rebalance_events() -> void {
                             }
                         }
                         queue.pop_front();
+                    } else {
+                        inactive.insert(load.id->id());
+                        queue.push_back(load);
+                        queue.pop_front();
+                    }
+
+                    if (inactive.size() >= pool.size()) {
+                        return;
                     }
                 } else {
                     const auto range = pool | boost::adaptors::map_values | filtered(filter);
