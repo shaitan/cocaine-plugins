@@ -28,6 +28,7 @@ class spawn_t : public state_t, public std::enable_shared_from_this<spawn_t> {
     struct data_t {
         std::shared_ptr<session_t> session;
         std::shared_ptr<control_t> control;
+        std::shared_ptr<handshaking_t> handshaking;
     };
 
     synchronized<data_t> data;

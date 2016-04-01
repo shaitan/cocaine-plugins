@@ -117,10 +117,14 @@ spawn_t::activate(std::shared_ptr<session_t> session, upstream<io::worker::contr
     // been notified about it. Just create control dispatch to be able to handle heartbeats and save
     // it for further usage.
     auto control = data.apply([&](data_t& data) -> std::shared_ptr<control_t> {
-        data.session = session;
-        data.control = std::make_shared<control_t>(slave, std::move(stream));
+        if (data.handshaking) {
+            return data.handshaking->activate(std::move(session), std::move(stream));
+        } else {
+            data.session = session;
+            data.control = std::make_shared<control_t>(slave, std::move(stream));
 
-        return data.control;
+            return data.control;
+        }
     });
 
     return control;
@@ -145,16 +149,16 @@ spawn_t::on_spawn(std::chrono::high_resolution_clock::time_point start) {
 
     try {
         data.apply([&](data_t& data) {
-            auto handshaking = std::make_shared<handshaking_t>(slave, std::move(handle));
+            data.handshaking = std::make_shared<handshaking_t>(slave, std::move(handle));
             // May throw system error when failed to assign native descriptor to the fetcher.
-            slave->migrate(handshaking);
+            slave->migrate(data.handshaking);
 
             if (data.control) {
                 // We've already received handshake frame and can immediately skip handshaking
                 // state.
-                handshaking->activate(data.session, data.control);
+                data.handshaking->activate(data.session, data.control);
             } else {
-                handshaking->start(slave->profile.timeout.handshake);
+                data.handshaking->start(slave->profile.timeout.handshake);
             }
         });
     } catch (const std::exception& err) {
