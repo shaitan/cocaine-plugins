@@ -173,8 +173,8 @@ struct external_t::inner_t :
 
     std::chrono::time_point<std::chrono::system_clock> last_failed_connect_time;
     std::chrono::milliseconds seal_time;
-    static constexpr std::chrono::milliseconds min_seal_time {1000ul};
-    static constexpr std::chrono::milliseconds max_seal_time {1000000ul};
+    static constexpr auto min_seal_time = std::chrono::milliseconds(10ul);
+    static constexpr auto max_seal_time = std::chrono::milliseconds(10000ul);
 
 
 
