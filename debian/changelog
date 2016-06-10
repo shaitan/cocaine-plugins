@@ -1,3 +1,10 @@
+cocaine-plugins (0.12.8.29) unstable; urgency=low
+
+  * Fix: catch exceptions in Unicorn Service when failed to write abort
+    operation into deferred.
+
+ -- Evgeny Safronov <division494@gmail.com>  Fri, 10 Jun 2016 16:15:20 +0300
+
 cocaine-plugins (0.12.8.28) unstable; urgency=low
 
   * Fix: build on precise
