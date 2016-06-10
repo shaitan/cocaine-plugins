@@ -67,7 +67,11 @@ public:
             try {
                 result.write(future.get());
             } catch (const std::system_error& e) {
-                result.abort(e.code(), error::to_string(e));
+                try {
+                    result.abort(e.code(), error::to_string(e));
+                } catch (const std::exception& err) {
+                    // Pass.
+                }
             }
         };
         auto api_args = std::tuple_cat(std::make_tuple(unicorn.get(), callback), std::move(args));
