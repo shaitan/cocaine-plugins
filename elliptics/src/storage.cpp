@@ -24,9 +24,7 @@
 #include <cocaine/dynamic.hpp>
 #include <cocaine/logging.hpp>
 
-#include <blackhole/formatter/string.hpp>
-#include <blackhole/v1/attribute.hpp>
-#include <blackhole/v1/logger.hpp>
+#include <blackhole/wrapper.hpp>
 
 namespace cocaine { namespace storage {
 
@@ -37,52 +35,41 @@ using namespace cocaine::logging;
 using namespace cocaine::storage;
 namespace ell = ioremap::elliptics;
 
-static logging::priorities convert(ell::log_level level) {
-	switch (level) {
-	case DNET_LOG_DEBUG:
-		return logging::debug;
-	case DNET_LOG_NOTICE:
-	case DNET_LOG_INFO:
-		return logging::info;
-	case DNET_LOG_WARNING:
-		return logging::warning;
-	case DNET_LOG_ERROR:
-	default:
-		return logging::error;
-	};
-}
-
-class frontend_t : public blackhole::base_frontend_t {
+class log_adapter_t : public blackhole::wrapper_t {
 public:
-	frontend_t(std::shared_ptr<logging::logger_t> log, ell::log_level severity)
-	: log(std::move(log))
-	, severity(severity)
-	, formatter("%(message)s %(...::)s") {}
+	log_adapter_t(logging::logger_t &log)
+	: blackhole::wrapper_t(log, {{"storage", "elliptics"}}) {}
 
-	virtual void handle(const blackhole::log::record_t& record) {
-		const auto level =
-		    record.extract<dnet_log_level>(blackhole::keyword::severity<dnet_log_level>().name());
+	virtual void log(blackhole::severity_t severity, const blackhole::message_t &message) {
+		blackhole::wrapper_t::log(convert(severity), message);
+	}
 
-		if (level < severity) {
-			return;
-		}
+	virtual void
+	log(blackhole::severity_t severity, const blackhole::message_t &message, blackhole::attribute_pack &pack) {
+		blackhole::wrapper_t::log(convert(severity), message, pack);
+	}
 
-		const auto mapped = convert(level);
-
-		log->log(static_cast<int>(mapped), formatter.format(record));
+	virtual void
+	log(blackhole::severity_t severity, const blackhole::lazy_message_t &message, blackhole::attribute_pack &pack) {
+		blackhole::wrapper_t::log(convert(severity), message, pack);
 	}
 
 private:
-	std::shared_ptr<logging::logger_t> log;
-	ell::log_level severity;
-	blackhole::formatter::string_t formatter;
+	static logging::priorities convert(blackhole::severity_t severity) {
+		switch (severity) {
+		case DNET_LOG_DEBUG:
+			return logging::debug;
+		case DNET_LOG_NOTICE:
+		case DNET_LOG_INFO:
+			return logging::info;
+		case DNET_LOG_WARNING:
+			return logging::warning;
+		case DNET_LOG_ERROR:
+		default:
+			return logging::error;
+		};
+	}
 };
-
-log_adapter_t::log_adapter_t(std::shared_ptr<logging::logger_t> log, ell::log_level level)
-: ell::logger_base() {
-	verbosity(DNET_LOG_DEBUG);
-	add_frontend(std::unique_ptr<frontend_t>(new frontend_t(log, level)));
-}
 
 namespace {
 
@@ -104,13 +91,10 @@ dnet_config parse_json_config(const dynamic_t::object_t& args) {
 elliptics_storage_t::elliptics_storage_t(context_t &context, const std::string &name, const dynamic_t &args)
 : category_type(context, name, args)
 , m_context(context)
-, m_log(context.log(name)) // TODO: It was with attributes: {{"storage", "elliptics"}}.
-, // XXX: dynamic_t from cocaine can't convert int to uint, and DNET_LOG_INFO being an enum value is int
-  m_log_adapter(m_log, static_cast<ioremap::elliptics::log_level>(
-                           args.as_object().at("verbosity", uint(DNET_LOG_INFO)).as_uint()))
+, m_log(context.log(name))
 , m_read_latest(args.as_object().at("read_latest", false).as_bool())
 , m_config(parse_json_config(args.as_object()))
-, m_node(ell::logger(m_log_adapter, blackhole::log::attributes_t{{"storage", {"elliptics"}}}), m_config)
+, m_node(std::unique_ptr<logging::logger_t>(new log_adapter_t(*m_log)), m_config)
 , m_session(m_node) {
 	dynamic_t::array_t nodes = args.as_object().at("nodes").as_array();
 

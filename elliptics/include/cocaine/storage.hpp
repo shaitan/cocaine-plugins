@@ -22,8 +22,6 @@
 #ifndef COCAINE_ELLIPTICS_STORAGE_HPP
 #define COCAINE_ELLIPTICS_STORAGE_HPP
 
-#include <blackhole/record.hpp>
-
 #include <cocaine/api/service.hpp>
 #include <cocaine/api/storage.hpp>
 #include <cocaine/rpc/dispatch.hpp>
@@ -35,14 +33,6 @@ class elliptics_service_t;
 }
 
 namespace cocaine { namespace storage {
-
-/*
- * Wraps the v1.0 logger into the v0.2 interface to be usable within Elliptics.
- */
-class log_adapter_t : public ioremap::elliptics::logger_base {
-public:
-	log_adapter_t(std::shared_ptr<logging::logger_t> wrapped, ioremap::elliptics::log_level severity);
-};
 
 class elliptics_storage_t : public api::storage_t {
 public:
@@ -83,8 +73,6 @@ private:
 private:
 	context_t &m_context;
 	log_ptr m_log;
-
-	log_adapter_t m_log_adapter;
 	// Perform read latest operation on read request.
 	bool m_read_latest;
 	dnet_config m_config;

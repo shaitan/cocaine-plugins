@@ -19,6 +19,8 @@
 
 #include <cocaine/service.hpp>
 
+#include <iostream>
+
 #include <cocaine/dynamic.hpp>
 
 #include "cocaine/tuple.hpp"
