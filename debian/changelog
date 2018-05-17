@@ -1,3 +1,10 @@
+cocaine-plugins (0.12.14.57) unstable; urgency=low
+
+  * fix: catch unhandled exception
+  * feat: postmortem engine_t sequence
+
+ -- Kirill Smorodinnikov <shaitkir@gmail.com>  Thu, 17 May 2018 17:45:30 +0300
+
 cocaine-plugins (0.12.14.56) unstable; urgency=medium
 
   * Non-maintainer upload.
