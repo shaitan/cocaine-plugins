@@ -175,16 +175,19 @@ auto engine_t::control_population(boost::optional<std::size_t> count) -> void {
 
     pool_target.apply([&](boost::optional<std::size_t>& pool_target) {
         if (pool_target == count) {
+            COCAINE_LOG_DEBUG(log, "pool target wasn't updated, skipping (re)publish step");
             return;
         }
 
-        if (pool_target == 0) {
+        const auto zero = std::size_t{0};
+
+        if (pool_target == zero) {
             observers.apply([] (const observers_type& observers) {
                 for (const auto& o : observers) {
                     o->maybe_publish();
                 }
             });
-        } else if (count == 0) {
+        } else if (count == zero) {
             observers.apply([] (const observers_type& observers) {
                 for (const auto& o : observers) {
                     o->forced_unpublish();
@@ -683,6 +686,8 @@ auto engine_t::rebalance_slaves() -> void {
                 {"slaves", pool.size()},
                 {"target", target},
             });
+
+            on_postmortem_timer->reset();
 
             if (pool.size() >= profile.pool_limit) {
                 return;
