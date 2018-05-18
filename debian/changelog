@@ -1,3 +1,10 @@
+cocaine-plugins (0.12.14.58) unstable; urgency=low
+
+  * fixup: correct usage of boost::optional comparsion
+  * fix: destroy app outside of apps lock in node service
+
+ -- Kirill Smorodinnikov <shaitkir@gmail.com>  Fri, 18 May 2018 15:43:58 +0300
+
 cocaine-plugins (0.12.14.57) unstable; urgency=low
 
   * fix: catch unhandled exception
