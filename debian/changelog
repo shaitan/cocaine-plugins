@@ -1,3 +1,11 @@
+cocaine-plugins (0.12.14.59) unstable; urgency=low
+
+  * fix: terminate unix actor on failed publish
+  * feat: update libmetrics to 3.1.1-1
+  * fix: use steady_clock with ewma
+
+ -- Kirill Smorodinnikov <shaitkir@gmail.com>  Tue, 22 May 2018 13:40:14 +0300
+
 cocaine-plugins (0.12.14.58) unstable; urgency=low
 
   * fixup: correct usage of boost::optional comparsion
