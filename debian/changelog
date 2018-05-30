@@ -1,3 +1,9 @@
+cocaine-plugins (0.12.14.60) unstable; urgency=low
+
+  * fix: do not change population on destroy
+
+ -- Kirill Smorodinnikov <shaitkir@gmail.com>  Wed, 30 May 2018 10:29:35 +0300
+
 cocaine-plugins (0.12.14.59) unstable; urgency=low
 
   * fix: terminate unix actor on failed publish
