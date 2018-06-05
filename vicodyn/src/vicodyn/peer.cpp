@@ -71,7 +71,7 @@ auto peer_t::schedule_reconnect() -> void {
 }
 auto peer_t::schedule_reconnect(std::shared_ptr<cocaine::session_t>& session) -> void {
     if(connecting) {
-        COCAINE_LOG_INFO(logger, "reconnection is alredy in progress for {}", uuid());
+        COCAINE_LOG_INFO(logger, "reconnection is already in progress for {}", uuid());
         return;
     }
     if(session) {
@@ -136,7 +136,7 @@ auto peer_t::connect() -> void {
             return;
         }
         try {
-            COCAINE_LOG_INFO(logger, "suceesfully connected peer {} to {}", uuid(), endpoints());
+            COCAINE_LOG_INFO(logger, "successfully connected peer {} to {}", uuid(), endpoints());
             auto ptr = std::make_unique<asio::ip::tcp::socket>(std::move(*socket));
             auto new_session = context.engine().attach(std::move(ptr), nullptr);
             session.apply([&](std::shared_ptr<session_t>& session) {
