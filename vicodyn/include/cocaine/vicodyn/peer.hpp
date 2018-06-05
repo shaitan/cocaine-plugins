@@ -48,6 +48,8 @@ public:
 
     auto uuid() const -> const std::string&;
 
+    auto hostname() const -> const std::string&;
+
     auto endpoints() const -> const std::vector<asio::ip::tcp::endpoint>&;
 
     auto connected() const -> bool;
@@ -75,6 +77,7 @@ private:
         std::chrono::system_clock::time_point last_active;
         dynamic_t::object_t extra;
         std::string x_cocaine_cluster;
+        std::string hostname;
     } d;
 
 };

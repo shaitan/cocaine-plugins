@@ -38,9 +38,29 @@ peer_t::peer_t(context_t& context, asio::io_service& loop, endpoints_t endpoints
     timer(loop),
     logger(context.log(format("vicodyn_peer/{}", uuid))),
     connecting(),
-    d({std::move(uuid), std::move(endpoints), std::chrono::system_clock::now(), std::move(extra), {}})
+    d{
+        std::move(uuid),
+        std::move(endpoints),
+        std::chrono::system_clock::now(),
+        std::move(extra),
+        /*x_cocaine_cluster*/ {},
+        /*hostname*/ {},
+    }
 {
     d.x_cocaine_cluster = d.extra.at("x-cocaine-cluster", "").as_string();
+    d.hostname = [&]() -> std::string {
+        asio::io_service asio;
+        asio::ip::tcp::resolver resolver(asio);
+        const asio::ip::tcp::resolver::iterator end;
+
+        for (const auto& endpoint: d.endpoints) {
+            auto it = resolver.resolve(endpoint);
+            if (it != end) {
+                return it->host_name();
+            }
+        }
+        return {};
+    }();
 }
 
 auto peer_t::schedule_reconnect() -> void {
@@ -133,6 +153,10 @@ auto peer_t::connect() -> void {
 
 auto peer_t::uuid() const -> const std::string& {
     return d.uuid;
+}
+
+auto peer_t::hostname() const -> const std::string& {
+    return d.hostname;
 }
 
 auto peer_t::endpoints() const -> const std::vector<asio::ip::tcp::endpoint>& {
