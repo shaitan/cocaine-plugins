@@ -6,10 +6,10 @@ namespace cocaine {
 namespace vicodyn {
 
 request_context_t::request_context_t(blackhole::logger_t& logger) :
-    logger(logger),
-    start_time(clock_t::now()),
-    closed(ATOMIC_FLAG_INIT),
-    retry_counter(0)
+    logger_(logger),
+    start_time_(clock_t::now()),
+    closed_(ATOMIC_FLAG_INIT),
+    retry_counter_(0)
 {}
 
 request_context_t::~request_context_t() {
@@ -17,17 +17,17 @@ request_context_t::~request_context_t() {
 }
 
 auto request_context_t::mark_used_peer(std::shared_ptr<peer_t> peer) -> void {
-    used_peers->emplace_back(std::move(peer));
+    used_peers_->emplace_back(std::move(peer));
 }
 
 auto request_context_t::peer_use_count(const std::shared_ptr<peer_t>& peer) -> size_t {
-    return used_peers.apply([&](const std::vector<std::shared_ptr<peer_t>>& used_peers){
-        return std::count(used_peers.begin(), used_peers.end(), peer);
+    return used_peers_.apply([&](const std::vector<std::shared_ptr<peer_t>>& used_peers_){
+        return std::count(used_peers_.begin(), used_peers_.end(), peer);
     });
 }
 
 auto request_context_t::peer_use_count(const std::string& peer_uuid) -> size_t {
-    return used_peers.apply([&](const std::vector<std::shared_ptr<peer_t>>& used_peers){
+    return used_peers_.apply([&](const std::vector<std::shared_ptr<peer_t>>& used_peers){
         return std::count_if(used_peers.begin(), used_peers.end(), [&](const std::shared_ptr<peer_t>& peer){
             return peer->uuid() == peer_uuid;
         });
@@ -35,11 +35,15 @@ auto request_context_t::peer_use_count(const std::string& peer_uuid) -> size_t {
 }
 
 auto request_context_t::register_retry() -> void {
-    retry_counter++;
+    retry_counter_++;
 }
 
 auto request_context_t::retry_count() -> size_t {
-    return retry_counter;
+    return retry_counter_;
+}
+
+auto request_context_t::custom_context() -> synchronized<boost::any>& {
+    return custom_context_;
 }
 
 auto request_context_t::finish() -> void {
@@ -52,29 +56,29 @@ auto request_context_t::fail(const std::error_code& ec, blackhole::string_view r
 }
 
 auto request_context_t::current_duration_ms() -> size_t {
-    auto dur = std::chrono::duration_cast<std::chrono::milliseconds>(clock_t::now() - start_time);
+    auto dur = std::chrono::duration_cast<std::chrono::milliseconds>(clock_t::now() - start_time_);
     return dur.count();
 }
 
 auto request_context_t::write(int level, const std::string& msg) -> void {
-    if(closed.test_and_set()) {
+    if(closed_.test_and_set()) {
         return;
     }
     add_checkpoint("total_duration_ms");
 
     blackhole::view_of<blackhole::attributes_t>::type view;
-    auto sync_peers = used_peers.synchronize();
-    auto sync_checkpoints = checkpoints.synchronize();
+    auto sync_peers = used_peers_.synchronize();
+    auto sync_checkpoints = checkpoints_.synchronize();
     for (const auto& peer: *sync_peers) {
         view.emplace_back("peer", peer->uuid());
     }
-    view.emplace_back("retry_cnt", retry_counter);
+    view.emplace_back("retry_cnt", retry_counter_);
     for (const auto& checkpoint: *sync_checkpoints) {
-        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(checkpoint.when - start_time);
+        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(checkpoint.when - start_time_);
         view.emplace_back(blackhole::string_view(checkpoint.message, checkpoint.msg_len), ms.count());
     }
 
-    COCAINE_LOG(logger, logging::priorities(level), msg, view);
+    COCAINE_LOG(logger_, logging::priorities(level), msg, view);
 }
 
 } // namespace vicodyn
