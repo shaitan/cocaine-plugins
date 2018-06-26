@@ -1,26 +1,11 @@
 #include "cocaine/vicodyn/balancer/simple.hpp"
+#include "cocaine/vicodyn/balancer/utils.hpp"
 
 #include <cocaine/context.hpp>
 
 namespace cocaine {
 namespace vicodyn {
 namespace balancer {
-
-template<class Iterator, class Predicate>
-auto choose_random_if(Iterator begin, Iterator end, size_t size, Predicate p) -> Iterator {
-    std::vector<Iterator> chosen;
-    chosen.reserve(size);
-    while(begin != end) {
-        if(p(*begin)) {
-            chosen.push_back(begin);
-        }
-        begin++;
-    }
-    if(chosen.empty()) {
-        return end;
-    }
-    return chosen[rand() % chosen.size()];
-}
 
 simple_t::simple_t(context_t& ctx, peers_t& peers, asio::io_service& loop, const std::string& app_name,
                    const dynamic_t& args, const dynamic_t::object_t& locator_extra) :
