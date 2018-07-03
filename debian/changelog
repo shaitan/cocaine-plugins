@@ -1,3 +1,10 @@
+cocaine-plugins (0.12.14.64) unstable; urgency=low
+
+  * Refact: Move choose_random_if in vicodyn to separate header
+  * Feat: Add custom_context to request_context
+
+ -- Artem Selishchev <arselishev@gmail.com>  Tue, 03 Jul 2018 14:53:25 +0300
+
 cocaine-plugins (0.12.14.63) unstable; urgency=low
 
   * Fixed: post completion handler to avoid deadlock
