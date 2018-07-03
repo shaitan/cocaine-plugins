@@ -2,8 +2,6 @@
 
 #include "cocaine/idl/node.hpp"
 
-#include "cocaine/format/endpoint.hpp"
-
 #include <cocaine/executor/asio.hpp>
 #include <cocaine/forwards.hpp>
 #include <cocaine/locked_ptr.hpp>
@@ -12,8 +10,6 @@
 #include <cocaine/rpc/upstream.hpp>
 
 #include <asio/ip/tcp.hpp>
-
-#include <future>
 
 namespace cocaine {
 namespace vicodyn {
@@ -30,13 +26,13 @@ public:
 
     template<class Event, class ...Args>
     auto open_stream(std::shared_ptr<io::basic_dispatch_t> dispatch, Args&& ...args) -> io::upstream_ptr_t {
-        auto locked = session.synchronize();
+        auto locked = session_.synchronize();
         auto session = *locked;
         if(!session) {
             schedule_reconnect(session);
             throw error_t(error::not_connected, "session is not connected");
         }
-        d.last_active = std::chrono::system_clock::now();
+        d_.last_active = std::chrono::system_clock::now();
         auto stream = session->fork(std::move(dispatch));
         stream->send<Event>(std::forward<Args>(args)...);
         return stream;
@@ -63,13 +59,12 @@ public:
 private:
     auto schedule_reconnect(std::shared_ptr<cocaine::session_t>& session) -> void;
 
-    context_t& context;
-    std::string service_name;
-    asio::io_service& loop;
-    asio::deadline_timer timer;
-    std::unique_ptr<logging::logger_t> logger;
-    synchronized<std::shared_ptr<cocaine::session_t>> session;
-    bool connecting;
+    context_t& context_;
+    asio::io_service& loop_;
+    asio::deadline_timer timer_;
+    std::unique_ptr<logging::logger_t> logger_;
+    synchronized<std::shared_ptr<cocaine::session_t>> session_;
+    bool connecting_{false};
 
     struct {
         std::string uuid;
@@ -78,7 +73,7 @@ private:
         dynamic_t::object_t extra;
         std::string x_cocaine_cluster;
         std::string hostname;
-    } d;
+    } d_;
 
 };
 
