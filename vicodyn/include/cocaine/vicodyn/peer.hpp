@@ -11,7 +11,7 @@
 
 #include <asio/ip/tcp.hpp>
 
-#include <unordered_set>
+#include <unordered_map>
 
 namespace cocaine {
 namespace vicodyn {
@@ -82,7 +82,16 @@ private:
 // thread safe wrapper on map of peers indexed by uuid
 class peers_t {
 public:
-    struct app_service_t { };
+    class app_service_t {
+        using clock_t = std::chrono::steady_clock;
+
+        clock_t::time_point ban_until_;
+
+    public:
+        auto ban(const std::chrono::milliseconds& timeout) -> void;
+
+        auto banned() const -> bool;
+    };
 
     using endpoints_t = std::vector<asio::ip::tcp::endpoint>;
     // peer_uuid -> peer_ptr
@@ -131,6 +140,8 @@ public:
     auto register_app( const std::string& uuid, const std::string& name) -> void;
 
     auto erase_app(const std::string& uuid, const std::string& name) -> void;
+
+    auto ban_app(const std::string& uuid, const std::string& name, const std::chrono::milliseconds& timeout) -> void;
 
     auto erase(const std::string& uuid) -> void;
 

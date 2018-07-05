@@ -20,6 +20,7 @@ class simple_t: public api::vicodyn::balancer_t {
     size_t _retry_count;
     std::string app_name;
     std::string x_cocaine_cluster;
+    const std::chrono::milliseconds ban_timeout;
 
 public:
     simple_t(context_t& ctx, peers_t& peers, asio::io_service& loop, const std::string& app_name, const dynamic_t& args,

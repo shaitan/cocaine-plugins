@@ -226,6 +226,20 @@ auto peers_t::erase_app(const std::string& uuid, const std::string& name) -> voi
     });
 }
 
+auto peers_t::ban_app(const std::string& uuid, const std::string& name, const std::chrono::milliseconds& timeout) -> void {
+    apply([&](data_t& data) {
+        auto apps_it = data.apps.find(name);
+        if(apps_it ==  std::end(data.apps)) {
+            return;
+        }
+        auto app_service_it = apps_it->second.find(uuid);
+        if (app_service_it == std::end(apps_it->second)) {
+            return;
+        }
+        app_service_it->second.ban(timeout);
+    });
+}
+
 auto peers_t::erase(const std::string& uuid) -> void {
     erase_peer(uuid);
     apply([&](data_t& data) {
@@ -244,6 +258,16 @@ auto peers_t::peer(const std::string& uuid) -> std::shared_ptr<peer_t> {
         }
         return nullptr;
     });
+}
+
+auto peers_t::app_service_t::ban(const std::chrono::milliseconds& timeout) -> void {
+    if (timeout.count() > 0) {
+        ban_until_ = clock_t::now() + timeout;
+    }
+}
+
+auto peers_t::app_service_t::banned() const -> bool {
+    return ban_until_ > clock_t::now();
 }
 
 } // namespace vicodyn

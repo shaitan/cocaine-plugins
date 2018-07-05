@@ -2,6 +2,8 @@
 #include "cocaine/vicodyn/balancer/utils.hpp"
 
 #include <cocaine/context.hpp>
+#include <cocaine/format/peer.hpp>
+#include <cocaine/format/ptr.hpp>
 
 namespace cocaine {
 namespace vicodyn {
@@ -15,7 +17,8 @@ simple_t::simple_t(context_t& ctx, peers_t& peers, asio::io_service& loop, const
     args(args),
     _retry_count(args.as_object().at("retry_count", 4u).as_uint()),
     app_name(app_name),
-    x_cocaine_cluster(locator_extra.at("x-cocaine-cluster", "").as_string())
+    x_cocaine_cluster(locator_extra.at("x-cocaine-cluster", "").as_string()),
+    ban_timeout(args.as_object().at("ban-timeout-ms", 0U).as_uint())
 {
     COCAINE_LOG_INFO(logger, "created simple balancer for app {}", app_name);
 }
@@ -38,7 +41,12 @@ auto simple_t::choose_peer(const std::shared_ptr<request_context_t>& /*request_c
                 if(x_cocaine_cluster != pair.second->x_cocaine_cluster()) {
                     return false;
                 }
-                return apps.count(pair.second->uuid()) > 0;
+                auto app_service_it = apps.find(pair.second->uuid());
+                if (app_service_it == std::end(apps)) {
+                    return false;
+                }
+
+                return !app_service_it->second.banned();
             }
         );
         if(it != mapping.peers.end()) {
@@ -57,6 +65,10 @@ auto simple_t::on_error(const std::shared_ptr<peer_t>& peer, std::error_code ec,
     COCAINE_LOG_WARNING(logger, "peer errored - {}({})", ec.message(), msg);
     if(ec.category() == error::node_category() && ec.value() == error::node_errors::not_running) {
         peers.erase_app(peer->uuid(), app_name);
+    }
+    if(ec.category() == error::overseer_category() && ec.value() == error::queue_is_full) {
+        peers.ban_app(peer->uuid(), app_name, ban_timeout);
+        COCAINE_LOG_WARNING(logger, "queue is full, peer banned for {}ms - {}", ban_timeout.count(), peer);
     }
 }
 
