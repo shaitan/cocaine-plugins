@@ -11,6 +11,8 @@
 
 #include <asio/ip/tcp.hpp>
 
+#include <unordered_set>
+
 namespace cocaine {
 namespace vicodyn {
 
@@ -80,9 +82,15 @@ private:
 // thread safe wrapper on map of peers indexed by uuid
 class peers_t {
 public:
+    struct app_service_t { };
+
     using endpoints_t = std::vector<asio::ip::tcp::endpoint>;
-    using peers_data_t = std::map<std::string, std::shared_ptr<peer_t>>;
-    using app_data_t = std::map<std::string, std::set<std::string>>;
+    // peer_uuid -> peer_ptr
+    using peers_data_t = std::unordered_map<std::string, std::shared_ptr<peer_t>>;
+    // peer_uuid -> app_service
+    using app_services_t = std::unordered_map<std::string, app_service_t>;
+    // app_name -> app_services
+    using app_data_t = std::unordered_map<std::string, app_services_t>;
 
     struct data_t {
         peers_data_t peers;

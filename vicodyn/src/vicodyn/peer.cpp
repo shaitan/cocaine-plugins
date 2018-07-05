@@ -216,7 +216,7 @@ auto peers_t::erase_peer(const std::string& uuid) -> void {
 
 auto peers_t::register_app(const std::string& uuid, const std::string& name) -> void {
     apply([&](data_t& data) {
-        data.apps[name].insert(uuid);
+        data.apps[name][uuid];
     });
 }
 

@@ -46,6 +46,23 @@ struct dynamic_constructor<vicodyn::peer_t> {
     }
 };
 
+template<>
+struct dynamic_constructor<vicodyn::peers_t::app_services_t> {
+    static const bool enable = true;
+
+    static inline
+    void
+    convert(const vicodyn::peers_t::app_services_t& from, dynamic_t::value_t& to) {
+        dynamic_t::array_t data;
+        data.reserve(from.size());
+        for (const auto& pair: from) {
+            data.push_back(pair.first);
+        }
+        to = detail::dynamic::incomplete_wrapper<dynamic_t::object_t>();
+        boost::get<detail::dynamic::incomplete_wrapper<dynamic_t::array_t>>(to).set(std::move(data));
+    }
+};
+
 } // namespace cocaine
 
 
