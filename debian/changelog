@@ -1,3 +1,11 @@
+cocaine-plugins (0.12.14.65) unstable; urgency=low
+
+  * refact: Remove unused includes. Code style for private methods
+  * refact: Allow to store in peers_t details for app service
+  * feat: Ban peers if queue is full
+
+ -- Artem Selishchev <arselishev@gmail.com>  Mon, 09 Jul 2018 13:55:15 +0300
+
 cocaine-plugins (0.12.14.64) unstable; urgency=low
 
   * Refact: Move choose_random_if in vicodyn to separate header
