@@ -33,24 +33,27 @@ auto simple_t::choose_peer(const std::shared_ptr<request_context_t>& /*request_c
             throw error_t("no peers found");
         }
         auto& apps = apps_it->second;
-        auto it = choose_random_if(mapping.peers.begin(), mapping.peers.end(), mapping.peers.size(),
-            [&](const peers_t::peers_data_t::value_type& pair) -> bool {
-                if(!pair.second->connected()) {
-                    return false;
-                }
-                if(x_cocaine_cluster != pair.second->x_cocaine_cluster()) {
-                    return false;
-                }
-                auto app_service_it = apps.find(pair.second->uuid());
-                if (app_service_it == std::end(apps)) {
-                    return false;
-                }
-
-                return !app_service_it->second.banned();
+        std::vector<peers_t::peers_data_t::const_iterator> chosen;
+        chosen.reserve(apps.size());
+        for (const auto& app_it : apps) {
+            if (app_it.second.banned()) {
+                continue;
             }
-        );
-        if(it != mapping.peers.end()) {
-            return it->second;
+            auto peer_it = mapping.peers.find(app_it.first);
+            if (peer_it == mapping.peers.end()) {
+                continue;
+            }
+            if (!peer_it->second->connected()) {
+                continue;
+            }
+            if (peer_it->second->x_cocaine_cluster() != x_cocaine_cluster) {
+                continue;
+            }
+            chosen.push_back(peer_it);
+        }
+        auto it = choose_random(chosen.begin(), chosen.end());
+        if (it != chosen.end()) {
+            return (*it)->second;
         }
         COCAINE_LOG_WARNING(logger, "all peers do not have desired app");
         throw error_t("no peers found");

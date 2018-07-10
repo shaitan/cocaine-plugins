@@ -1,3 +1,5 @@
+#pragma once
+
 #include <vector>
 
 namespace cocaine {
@@ -6,19 +8,16 @@ namespace balancer {
 
 auto uint64_rand() -> uint64_t;
 
-template<class Iterator, class Predicate>
-auto choose_random_if(Iterator begin, Iterator end, std::size_t size, Predicate p) -> Iterator {
-    std::vector<Iterator> chosen;
-    chosen.reserve(size);
-    for(; begin != end; ++begin) {
-        if(p(*begin)) {
-            chosen.push_back(begin);
-        }
-    }
-    if(chosen.empty()) {
+template<typename Iterator>
+auto choose_random(Iterator begin, Iterator end) -> Iterator {
+    static_assert(std::is_same<typename Iterator::iterator_category, std::random_access_iterator_tag>::value,
+            "Function works very slow for containers with no random access iterator");
+    auto size = std::distance(begin, end);
+    if (!size) {
         return end;
     }
-    return chosen[uint64_rand() % chosen.size()];
+    std::advance(begin, uint64_rand() % size);
+    return begin;
 }
 
 } // namespace balancer
