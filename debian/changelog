@@ -1,3 +1,11 @@
+cocaine-plugins (0.12.14.66) unstable; urgency=low
+
+  * fix: Optimization. Iterate peers for choosing according applications
+  * fix: Skip used peers in simple balancer
+  * fix: Get rid of unnecessary lock in peer_t::connected()
+
+ -- Artem Selishchev <arselishev@gmail.com>  Wed, 11 Jul 2018 19:59:00 +0300
+
 cocaine-plugins (0.12.14.65) unstable; urgency=low
 
   * refact: Remove unused includes. Code style for private methods
