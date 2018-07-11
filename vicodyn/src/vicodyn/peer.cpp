@@ -162,9 +162,7 @@ auto peer_t::endpoints() const -> const std::vector<asio::ip::tcp::endpoint>& {
 }
 
 auto peer_t::connected() const -> bool {
-    return session_.apply([&](const std::shared_ptr<session_t>& session){
-        return static_cast<bool>(session);
-    });
+    return static_cast<bool>(session_.unsafe());
 }
 
 auto peer_t::last_active() const -> std::chrono::system_clock::time_point {
