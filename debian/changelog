@@ -1,3 +1,10 @@
+cocaine-plugins (0.12.14.67) unstable; urgency=low
+
+  * Refactored: keep log as unique_ptr in node
+  * Chore: move some node logs to INFO
+
+ -- Kirill Smorodinnikov <shaitkir@gmail.com>  Wed, 18 Jul 2018 10:36:01 +0300
+
 cocaine-plugins (0.12.14.66) unstable; urgency=low
 
   * fix: Optimization. Iterate peers for choosing according applications
