@@ -43,7 +43,7 @@ public:
     using callback_type = std::function<void(std::future<void> future)>;
 
 private:
-    const std::shared_ptr<logging::logger_t> log;
+    const std::unique_ptr<logging::logger_t> log;
 
     context_t& context;
 
