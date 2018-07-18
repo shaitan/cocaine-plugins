@@ -80,7 +80,7 @@ class control_slot_t:
         virtual
         void
         discard(const std::error_code&) {
-            COCAINE_LOG_DEBUG(p->log, "client has been disappeared, assuming direct control");
+            COCAINE_LOG_INFO(p->log, "client has been disappeared, assuming direct control");
             if (auto overseer = p->overseer.lock()) {
                 overseer->o->control_population(boost::none);
             }
@@ -694,7 +694,7 @@ app_t::~app_t() {
     work.reset();
     thread->join();
 
-    COCAINE_LOG_DEBUG(state->logger(), "application has destroyed its internal state");
+    COCAINE_LOG_INFO(state->logger(), "application has destroyed its internal state");
 }
 
 std::string

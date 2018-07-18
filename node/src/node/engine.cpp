@@ -71,7 +71,7 @@ engine_t::engine_t(context_t& context,
 }
 
 engine_t::~engine_t() {
-    COCAINE_LOG_DEBUG(log, "overseer has been destroyed");
+    COCAINE_LOG_INFO(log, "overseer has been destroyed");
 }
 
 auto engine_t::active_workers() const -> std::uint32_t {

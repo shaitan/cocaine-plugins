@@ -34,7 +34,7 @@ overseer_t::overseer_t(context_t& context,
 }
 
 overseer_t::~overseer_t() {
-    COCAINE_LOG_DEBUG(engine->log, "overseer is processing terminate request");
+    COCAINE_LOG_INFO(engine->log, "overseer is processing terminate request");
     engine->cancel();
 }
 

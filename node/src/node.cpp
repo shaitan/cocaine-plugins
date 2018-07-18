@@ -384,7 +384,7 @@ node_t::node_t(context_t& context, asio::io_service& asio, const std::string& na
 }
 
 node_t::~node_t() {
-    COCAINE_LOG_DEBUG(log, "shutting down apps");
+    COCAINE_LOG_INFO(log, "shutting down apps");
 }
 
 auto
@@ -410,7 +410,7 @@ node_t::start_app(const std::string& name, const std::string& profile) -> deferr
 
 auto
 node_t::start_app(const std::string& name, const std::string& profile, callback_type callback) -> void {
-    COCAINE_LOG_DEBUG(log, "processing `start_app` request, app: '{}'", name);
+    COCAINE_LOG_INFO(log, "processing `start_app` request, app: '{}'", name);
 
     apps.apply([&](std::map<std::string, std::shared_ptr<node::app_t>>& apps) {
         auto it = apps.find(name);
@@ -430,7 +430,7 @@ node_t::start_app(const std::string& name, const std::string& profile, callback_
 
 auto
 node_t::pause_app(const std::string& name) -> void {
-    COCAINE_LOG_DEBUG(log, "processing `pause_app` request, app: '{}'", name);
+    COCAINE_LOG_INFO(log, "processing `pause_app` request, app: '{}'", name);
 
     apps.apply([&](std::map<std::string, std::shared_ptr<node::app_t>>& apps) {
         auto it = apps.find(name);
