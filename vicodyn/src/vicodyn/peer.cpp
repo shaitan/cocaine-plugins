@@ -20,8 +20,41 @@
 #include <metrics/registry.hpp>
 #include <cocaine/rpc/upstream.hpp>
 
+#include <random>
+
 namespace cocaine {
 namespace vicodyn {
+namespace {
+
+template<class T>
+class weighted_distribution {
+    std::vector<T> elements_;
+    std::vector<double> weights_;
+
+public:
+    weighted_distribution(std::size_t reserve) {
+        elements_.reserve(reserve);
+        weights_.reserve(reserve);
+    }
+
+    auto add(T elem, double weight) -> void {
+        elements_.push_back(std::move(elem));
+        weights_.push_back(weight);
+    }
+
+    auto random() -> boost::optional<T> {
+        if (weights_.empty()) {
+            return {};
+        }
+        // We use keyword "static", because creation of entity below is very expensive
+        static std::mt19937 generator{std::random_device{}()};
+        // Attention: unnecessary copying. TODO: Fix when it will be possible
+        std::discrete_distribution<std::size_t> distribution(weights_.begin(), weights_.end());
+        return elements_[distribution(generator)];
+    }
+};
+
+} // anonymous namespace
 
 peer_t::~peer_t(){
     session_.apply([&](std::shared_ptr<session_t>& session) {
@@ -177,10 +210,11 @@ auto peer_t::x_cocaine_cluster() const -> const std::string& {
     return d_.x_cocaine_cluster;
 }
 
-peers_t::peers_t(context_t& context):
-    context(context),
-    logger(context.log("vicodyn/peers_t"))
-{}
+peers_t::peers_t(context_t& context, const dynamic_t& args)
+    : context(context)
+    , logger(context.log("vicodyn/peers_t"))
+    , timings_window(std::chrono::milliseconds(args.as_object().at("timings-window-ms", 30000U).as_uint())) {
+}
 
 auto peers_t::register_peer(const std::string& uuid, const endpoints_t& endpoints, dynamic_t::object_t extra)
     -> std::shared_ptr<peer_t>
@@ -214,7 +248,7 @@ auto peers_t::erase_peer(const std::string& uuid) -> void {
 
 auto peers_t::register_app(const std::string& uuid, const std::string& name) -> void {
     apply([&](data_t& data) {
-        data.apps[name][uuid];
+        data.apps[name].emplace(uuid, app_service_t(timings_window));
     });
 }
 
@@ -224,7 +258,8 @@ auto peers_t::erase_app(const std::string& uuid, const std::string& name) -> voi
     });
 }
 
-auto peers_t::ban_app(const std::string& uuid, const std::string& name, const std::chrono::milliseconds& timeout) -> void {
+auto peers_t::ban_app(const std::string& uuid, const std::string& name, const std::chrono::milliseconds& timeout)
+                -> void {
     apply([&](data_t& data) {
         auto apps_it = data.apps.find(name);
         if(apps_it ==  std::end(data.apps)) {
@@ -238,11 +273,26 @@ auto peers_t::ban_app(const std::string& uuid, const std::string& name, const st
     });
 }
 
+auto peers_t::add_app_request_duration(const std::string& uuid, const std::string& name, clock_t::duration elapsed)
+                -> void {
+    apply([&](data_t& data) {
+        auto apps_it = data.apps.find(name);
+        if(apps_it ==  std::end(data.apps)) {
+            return;
+        }
+        auto app_service_it = apps_it->second.find(uuid);
+        if (app_service_it == std::end(apps_it->second)) {
+            return;
+        }
+        app_service_it->second.add_request_duration(elapsed);
+    });
+}
+
 auto peers_t::erase(const std::string& uuid) -> void {
     erase_peer(uuid);
     apply([&](data_t& data) {
         data.peers.erase(uuid);
-        for (auto pair : data.apps) {
+        for (auto& pair : data.apps) {
             pair.second.erase(uuid);
         }
     });
@@ -258,7 +308,11 @@ auto peers_t::peer(const std::string& uuid) -> std::shared_ptr<peer_t> {
     });
 }
 
-auto peers_t::app_service_t::ban(const std::chrono::milliseconds& timeout) -> void {
+peers_t::app_service_t::app_service_t(clock_t::duration timings_window)
+    : timings_ewma_(new metrics::usts::ewma<clock_t >(timings_window)) {
+}
+
+auto peers_t::app_service_t::ban(std::chrono::milliseconds timeout) -> void {
     if (timeout.count() > 0) {
         ban_until_ = clock_t::now() + timeout;
     }
@@ -266,6 +320,74 @@ auto peers_t::app_service_t::ban(const std::chrono::milliseconds& timeout) -> vo
 
 auto peers_t::app_service_t::banned() const -> bool {
     return ban_until_ > clock_t::now();
+}
+
+auto peers_t::app_service_t::add_request_duration(clock_t::duration elapsed) -> void {
+    timings_ewma_->add(elapsed.count());
+}
+
+auto peers_t::app_service_t::avg_request_duration_ns() const -> double {
+    return timings_ewma_->get();
+}
+
+auto peers_t::choose_random(const std::string& app_name, const peer_predicate_t& peer_predicate,
+                const app_predicate_t& app_predicate) const -> std::shared_ptr<peer_t> {
+    auto enumerator = [&](const app_services_t& apps, const app_handler_t& handler) {
+        for (const auto& app_service : apps) {
+            handler(app_service.first, app_service.second);
+        }
+    };
+    return choose_random(enumerator, app_name, peer_predicate, app_predicate);
+}
+
+auto peers_t::choose_random(const std::vector<std::string>& uuids, const std::string& app_name,
+                const peer_predicate_t& peer_predicate, const app_predicate_t& app_predicate) const
+                -> std::shared_ptr<peer_t> {
+    auto enumerator = [&](const app_services_t& apps, const app_handler_t& handler) {
+        for (const std::string& uuid : uuids) {
+            auto app_service_it = apps.find(uuid);
+            if (app_service_it == apps.end()) {
+                continue;
+            }
+            handler(uuid, app_service_it->second);
+        }
+    };
+    return choose_random(enumerator, app_name, peer_predicate, app_predicate);
+}
+
+auto peers_t::choose_random(const app_enumerator_t& app_enumerator, const std::string& app_name,
+                const peer_predicate_t& peer_predicate, const app_predicate_t& app_predicate) const
+                -> std::shared_ptr<peer_t> {
+    return apply_shared([&](const data_t& data) -> std::shared_ptr<peer_t> {
+        auto apps_it = data.apps.find(app_name);
+        if (apps_it == data.apps.end() || apps_it->second.empty()) {
+            COCAINE_LOG_WARNING(logger, "peer list for app \"{}\" is empty", app_name);
+            return {};
+        }
+        const auto& app_services = apps_it->second;
+
+        // Choose peer according average elapsed time per request
+        weighted_distribution<peers_data_t::const_iterator> distribution(app_services.size());
+        app_enumerator(app_services, [&](const std::string& uuid, const app_service_t& app_service) {
+            if (!app_predicate(app_service)) {
+                return;
+            }
+            auto peer_it = data.peers.find(uuid);
+            if (peer_it == data.peers.end()) {
+                return;
+            }
+            if (!peer_predicate(*peer_it->second)) {
+                return;
+            }
+            auto positive_duration_ns = std::max(app_service.avg_request_duration_ns(), 1.);
+            distribution.add(peer_it, 1. / positive_duration_ns);
+        });
+        auto chosen = distribution.random();
+        if (!chosen) {
+            return {};
+        }
+        return chosen.get()->second;
+    });
 }
 
 } // namespace vicodyn

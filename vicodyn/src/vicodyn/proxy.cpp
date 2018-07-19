@@ -110,6 +110,7 @@ public:
 
 class vicodyn_dispatch_t : public std::enable_shared_from_this<vicodyn_dispatch_t> {
     using protocol = io::protocol<app_tag>::scope;
+    using clock_t = peers_t::clock_t;
 
     struct error_buffer_t {
         hpack::headers_t headers;
@@ -132,6 +133,7 @@ class vicodyn_dispatch_t : public std::enable_shared_from_this<vicodyn_dispatch_
         std::shared_ptr<peer_t> peer;
         safe_stream_t forward_stream;
         std::unique_ptr<logging::logger_t> logger;
+        clock_t::time_point start_time;
     };
 
     proxy_t& proxy;
@@ -265,9 +267,9 @@ public:
     ~vicodyn_dispatch_t() {
     }
 
-    auto enqueue(const hpack::headers_t& headers, std::string event) -> std::shared_ptr<dispatch<app_tag>> {
+    auto enqueue(const hpack::headers_t& headers, const std::string& event) -> std::shared_ptr<dispatch<app_tag>> {
         return mutex.apply([&](){
-            return enqueue_unsafe(headers, std::move(event));
+            return enqueue_unsafe(headers, event);
         });
     }
 
@@ -338,6 +340,8 @@ private:
     auto on_backward_choke(const hpack::headers_t& headers) -> void {
         try {
             if(backward_stream.close(headers)) {
+                proxy.peers.add_app_request_duration(endpoint.peer->uuid(), proxy.app_name,
+                                clock_t::now() - endpoint.start_time);
                 request_context->add_checkpoint("after_bchoke");
             }
         } catch (const std::system_error& e) {
@@ -367,20 +371,25 @@ private:
         return std::shared_ptr<dispatch<app_tag>>(shared_from_this(), &forward_dispatch);
     }
 
-    auto enqueue_unsafe(hpack::headers_t headers, std::string event) -> std::shared_ptr<dispatch<app_tag>> {
+    auto choose_endpoint() -> void {
+        endpoint.peer = proxy.balancer->choose_peer(request_context, buffer.headers, buffer.event);
+        request_context->mark_used_peer(endpoint.peer);
+        endpoint.logger = std::make_unique<blackhole::wrapper_t>(*proxy.logger,
+                        blackhole::attributes_t{{"peer", endpoint.peer->uuid()}});
+        endpoint.start_time = clock_t::now();
+        auto u = endpoint.peer->open_stream<io::node::enqueue>(shared_backward_dispatch(), buffer.headers,
+                        proxy.app_name, buffer.event);
+        endpoint.forward_stream = std::move(safe_stream_t(std::move(u)));
+    }
+
+    auto enqueue_unsafe(const hpack::headers_t& headers, const std::string& event)
+                -> std::shared_ptr<dispatch<app_tag>> {
         buffer.event = std::move(event);
         buffer.headers = std::move(headers);
 
-        endpoint.peer = proxy.balancer->choose_peer(request_context, buffer.headers, buffer.event);
-        endpoint.logger = std::make_unique<blackhole::wrapper_t>(*proxy.logger,
-                            blackhole::attributes_t{{"peer", endpoint.peer->uuid()}});
-        request_context->mark_used_peer(endpoint.peer);
-
-        COCAINE_LOG_DEBUG(endpoint.logger, "processing enqueue");
         try {
-            auto u = endpoint.peer->open_stream<io::node::enqueue>(shared_backward_dispatch(),buffer.headers,
-                            proxy.app_name, buffer.event);
-            endpoint.forward_stream = safe_stream_t(std::move(u));
+            choose_endpoint();
+
             request_context->add_checkpoint("after_enqueue");
         } catch (const std::system_error& e) {
             COCAINE_LOG_WARNING(endpoint.logger, "failed to send enqueue to forward stream - {}", error::to_string(e));
@@ -407,14 +416,10 @@ private:
         if(request_context->retry_count() > proxy.balancer->retry_count()) {
             throw error_t("maximum number of retries reached");
         }
-        endpoint.peer = proxy.balancer->choose_peer(request_context, buffer.headers, buffer.event);
         request_context->add_checkpoint("retry");
-        request_context->mark_used_peer(endpoint.peer);
-        endpoint.logger = std::make_unique<blackhole::wrapper_t>(*proxy.logger,
-                        blackhole::attributes_t{{"peer", endpoint.peer->uuid()}});
-        auto u = endpoint.peer->open_stream<io::node::enqueue>(shared_backward_dispatch(), buffer.headers,
-                        proxy.app_name, buffer.event);
-        endpoint.forward_stream = std::move(safe_stream_t(std::move(u)));
+
+        choose_endpoint();
+
         for(size_t i = 0; i < buffer.chunks.size(); i++) {
             endpoint.forward_stream.chunk(buffer.chunk_headers[i], buffer.chunks[i]);
         }
@@ -451,7 +456,7 @@ proxy_t::proxy_t(context_t& context, asio::io_service& loop, peers_t& peers, con
         auto event = std::get<0>(args);
         auto dispatch_name = format("{}/{}/streaming", this->name(), event);
         auto dispatch = std::make_shared<vicodyn_dispatch_t>(*this, dispatch_name, backward_stream);
-        return result_t(dispatch->enqueue(headers, std::move(event)));
+        return result_t(dispatch->enqueue(headers, event));
     });
 }
 

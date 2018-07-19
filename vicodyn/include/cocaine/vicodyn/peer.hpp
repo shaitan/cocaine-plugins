@@ -8,6 +8,7 @@
 #include <cocaine/logging.hpp>
 #include <cocaine/rpc/session.hpp>
 #include <cocaine/rpc/upstream.hpp>
+#include <metrics/usts/ewma.hpp>
 
 #include <asio/ip/tcp.hpp>
 
@@ -82,17 +83,30 @@ private:
 // thread safe wrapper on map of peers indexed by uuid
 class peers_t {
 public:
-    class app_service_t {
-        using clock_t = std::chrono::steady_clock;
+    using clock_t = std::chrono::steady_clock;
 
+    class app_service_t {
         clock_t::time_point ban_until_;
+        std::unique_ptr<metrics::usts::ewma<clock_t>> timings_ewma_;
 
     public:
-        auto ban(const std::chrono::milliseconds& timeout) -> void;
+        app_service_t(clock_t::duration timings_window);
+
+        auto ban(std::chrono::milliseconds timeout) -> void;
 
         auto banned() const -> bool;
+
+        /// Adds the request processing time to consider the average value.
+        ///
+        /// \param elapsed Observed value.
+        auto add_request_duration(clock_t::duration elapsed) -> void;
+
+        /// Returns the average processing time of request in nanoseconds.
+        auto avg_request_duration_ns() const -> double;
     };
 
+    using app_predicate_t = std::function<bool(const app_service_t& app_service)>;
+    using peer_predicate_t = std::function<bool(const peer_t& peer_service)>;
     using endpoints_t = std::vector<asio::ip::tcp::endpoint>;
     // peer_uuid -> peer_ptr
     using peers_data_t = std::unordered_map<std::string, std::shared_ptr<peer_t>>;
@@ -108,10 +122,14 @@ public:
 
 
 private:
+    using app_handler_t = std::function<void(const std::string& uuid, const app_service_t& app_service)>;
+    using app_enumerator_t = std::function<void(const app_services_t& apps, const app_handler_t& handler)>;
+
     context_t& context;
     std::unique_ptr<logging::logger_t> logger;
     executor::owning_asio_t executor;
     data_t data;
+    const clock_t::duration timings_window;
     mutable boost::shared_mutex mutex;
 
 
@@ -129,23 +147,38 @@ public:
     }
 
 
-    peers_t(context_t& context);
+    peers_t(context_t& context, const dynamic_t& args);
 
-    auto register_peer(const std::string& uuid, const endpoints_t& endpoints, dynamic_t::object_t extra) -> std::shared_ptr<peer_t>;
+    auto register_peer(const std::string& uuid, const endpoints_t& endpoints, dynamic_t::object_t extra)
+                    -> std::shared_ptr<peer_t>;
 
     auto register_peer(const std::string& uuid, std::shared_ptr<peer_t> peer) -> void;
 
     auto erase_peer(const std::string& uuid) -> void;
 
-    auto register_app( const std::string& uuid, const std::string& name) -> void;
+    auto register_app(const std::string& uuid, const std::string& name) -> void;
 
     auto erase_app(const std::string& uuid, const std::string& name) -> void;
 
     auto ban_app(const std::string& uuid, const std::string& name, const std::chrono::milliseconds& timeout) -> void;
 
+    auto add_app_request_duration(const std::string& uuid, const std::string& name, clock_t::duration elapsed) -> void;
+
     auto erase(const std::string& uuid) -> void;
 
     auto peer(const std::string& uuid) -> std::shared_ptr<peer_t>;
+
+    auto choose_random(const std::string& app_name, const peer_predicate_t& peer_predicate,
+                    const app_predicate_t& app_service_predicate) const -> std::shared_ptr<peer_t>;
+    auto choose_random(const std::vector<std::string>& uuids, const std::string& app_name,
+                    const peer_predicate_t& peer_predicate, const app_predicate_t& app_service_predicate) const
+                    -> std::shared_ptr<peer_t>;
+
+
+private:
+    auto choose_random(const app_enumerator_t& enumerator, const std::string& app_name,
+                    const peer_predicate_t& peer_predicate, const app_predicate_t& app_service_predicate) const
+                    -> std::shared_ptr<peer_t>;
 };
 
 } // namespace vicodyn
