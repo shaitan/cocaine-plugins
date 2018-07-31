@@ -108,26 +108,106 @@ public:
     }
 };
 
+class buffer_t {
+    std::string event_;
+    hpack::headers_t headers_;
+
+    std::vector<std::pair<hpack::headers_t, std::string>> chunks_;
+    boost::optional<hpack::headers_t> choke_;
+    bool failed_ = false;
+    bool overfull_ = false;
+
+    std::size_t capacity_;
+
+
+private:
+    auto try_account(const hpack::headers_t& headers, std::size_t data_size = 0) -> bool {
+        if (overfull()) {
+            return false;
+        }
+        for (const auto& header : headers) {
+            data_size += header.http2_size();
+        }
+        if (data_size > capacity_) {
+            // If we exceed the buffer once, we'll disable it for the request forever, because it has became invalid.
+            overfull_ = true;
+            clear();
+            return false;
+        }
+        capacity_ -= data_size;
+        return true;
+    }
+
+
+public:
+    buffer_t(std::size_t capacity)
+        : capacity_(capacity) {
+    }
+
+    auto overfull() const -> bool {
+        return overfull_;
+    }
+
+    auto failed() const -> bool {
+        return failed_;
+    }
+
+    auto store_event(const hpack::headers_t& headers, const std::string& event) -> void {
+        if (try_account(headers, event.size())) {
+            headers_ = headers;
+            event_ = event;
+        }
+    }
+
+    auto event() const -> const std::string& {
+        return event_;
+    }
+
+    auto headers() const -> const hpack::headers_t& {
+        return headers_;
+    }
+
+    auto chunk(const hpack::headers_t& headers, const std::string& data) -> void {
+        if (try_account(headers, data.size())) {
+            chunks_.emplace_back(headers, data);
+        }
+    }
+
+    auto close(const hpack::headers_t& headers) -> void {
+        if (try_account(headers)) {
+            choke_ = headers;
+        }
+    }
+
+    auto error() -> void {
+        // If we receive an error, we don't need to buffer a request.
+        failed_ = true;
+        clear();
+    }
+
+    auto flush(safe_stream_t& stream) const -> void {
+        for(const auto& chunk : chunks_) {
+            stream.chunk(chunk.first, chunk.second);
+        }
+        if (choke_) {
+            stream.close(choke_.get());
+        }
+    }
+
+    auto clear() -> void {
+        event_.clear();
+        event_.shrink_to_fit();
+        headers_.clear();
+        headers_.shrink_to_fit();
+        chunks_.clear();
+        chunks_.shrink_to_fit();
+        choke_.reset();
+    }
+};
+
 class vicodyn_dispatch_t : public std::enable_shared_from_this<vicodyn_dispatch_t> {
     using protocol = io::protocol<app_tag>::scope;
     using clock_t = peers_t::clock_t;
-
-    struct error_buffer_t {
-        hpack::headers_t headers;
-        std::error_code ec;
-        std::string msg;
-    };
-
-    struct buffer_t {
-        std::string event;
-        hpack::headers_t headers;
-
-        std::vector<std::string> chunks;
-        std::vector<hpack::headers_t> chunk_headers;
-
-        boost::optional<error_buffer_t> error;
-        boost::optional<hpack::headers_t> choke;
-    };
 
     struct endpoint_t {
         std::shared_ptr<peer_t> peer;
@@ -212,6 +292,7 @@ public:
 
     vicodyn_dispatch_t(proxy_t& _proxy, const std::string& name, upstream<app_tag> b_stream) :
         proxy(_proxy),
+        buffer(proxy.buffer_capacity),
         request_context(std::make_shared<request_context_t>(*proxy.logger)),
         forward_dispatch(name + "/forward"),
         backward_dispatch(name + "/backward"),
@@ -275,30 +356,29 @@ public:
 
 private:
     auto on_forward_chunk(const hpack::headers_t& headers, std::string chunk) -> void {
-        COCAINE_LOG_DEBUG(endpoint.logger, "processing chunk");
+        COCAINE_LOG_DEBUG(endpoint.logger, "processing chunk from client");
         // For this place and below: we don't need to store and use cache if we have started
         // reply to backward stream
         if (!backward_stream.started()) {
-            buffer.chunks.push_back(std::move(chunk));
-            buffer.chunk_headers.push_back(headers);
+            buffer.chunk(headers, chunk);
         }
-        endpoint.forward_stream.chunk(headers, buffer.chunks.back());
+        endpoint.forward_stream.chunk(headers, std::move(chunk));
         request_context->add_checkpoint("after_fchunk");
     }
 
     auto on_forward_choke(const hpack::headers_t& headers) -> void {
-        COCAINE_LOG_DEBUG(endpoint.logger, "processing choke");
+        COCAINE_LOG_DEBUG(endpoint.logger, "processing choke from client");
         if (!backward_stream.started()) {
-            buffer.choke = headers;
+            buffer.close(headers);
         }
         endpoint.forward_stream.close(headers);
         request_context->add_checkpoint("after_fchoke");
     }
 
     auto on_forward_error(const hpack::headers_t& headers, const std::error_code& ec, const std::string& msg) -> void {
-        COCAINE_LOG_INFO(endpoint.logger, "processing error");
+        COCAINE_LOG_INFO(endpoint.logger, "processing error from client {}({}) - {}", ec.message(), ec.value(), msg);
         if (!backward_stream.started()) {
-            buffer.error = {headers, ec, msg};
+            buffer.error();
         }
         endpoint.forward_stream.error(headers, ec, msg);
         request_context->add_checkpoint("after_ferror");
@@ -371,24 +451,23 @@ private:
         return std::shared_ptr<dispatch<app_tag>>(shared_from_this(), &forward_dispatch);
     }
 
-    auto choose_endpoint() -> void {
-        endpoint.peer = proxy.balancer->choose_peer(request_context, buffer.headers, buffer.event);
+    auto choose_endpoint(const hpack::headers_t& headers, const std::string& event) -> void {
+        endpoint.peer = proxy.balancer->choose_peer(request_context, headers, event);
         request_context->mark_used_peer(endpoint.peer);
         endpoint.logger = std::make_unique<blackhole::wrapper_t>(*proxy.logger,
                         blackhole::attributes_t{{"peer", endpoint.peer->uuid()}});
         endpoint.start_time = clock_t::now();
-        auto u = endpoint.peer->open_stream<io::node::enqueue>(shared_backward_dispatch(), buffer.headers,
-                        proxy.app_name, buffer.event);
+
+        auto u = endpoint.peer->open_stream<io::node::enqueue>(shared_backward_dispatch(), headers,
+                        proxy.app_name, event);
         endpoint.forward_stream = std::move(safe_stream_t(std::move(u)));
     }
 
-    auto enqueue_unsafe(const hpack::headers_t& headers, const std::string& event)
-                -> std::shared_ptr<dispatch<app_tag>> {
-        buffer.event = std::move(event);
-        buffer.headers = std::move(headers);
-
+    auto enqueue_unsafe(const hpack::headers_t& headers, const std::string& event) -> std::shared_ptr<dispatch<app_tag>> {
         try {
-            choose_endpoint();
+            buffer.store_event(headers, event);
+
+            choose_endpoint(headers, event);
 
             request_context->add_checkpoint("after_enqueue");
         } catch (const std::system_error& e) {
@@ -410,24 +489,24 @@ private:
     auto retry_unsafe() -> void {
         COCAINE_LOG_INFO(endpoint.logger, "retrying");
         request_context->register_retry();
-        if(backward_stream.started()) {
+        if (backward_stream.started()) {
             throw error_t("retry is forbidden - response chunk was sent");
         }
-        if(request_context->retry_count() > proxy.balancer->retry_count()) {
-            throw error_t("maximum number of retries reached");
+        if (buffer.failed()) {
+            throw error_t("retry is forbidden - client sent error");
+        }
+        if (buffer.overfull()) {
+            throw error_t("retry is forbidden - buffer overflow");
+        }
+        if (request_context->retry_count() > proxy.balancer->retry_count()) {
+            throw error_t("retry is forbidden - maximum number of retries reached");
         }
         request_context->add_checkpoint("retry");
 
-        choose_endpoint();
+        choose_endpoint(buffer.headers(), buffer.event());
 
-        for(size_t i = 0; i < buffer.chunks.size(); i++) {
-            endpoint.forward_stream.chunk(buffer.chunk_headers[i], buffer.chunks[i]);
-        }
-        if (buffer.choke) {
-            endpoint.forward_stream.close(buffer.choke.get());
-        } else if (buffer.error) {
-            endpoint.forward_stream.error(buffer.error->headers, buffer.error->ec, buffer.error->msg);
-        }
+        // Forward all stored at the moment buffer. Other parts will be forwarded by callbacks.
+        buffer.flush(endpoint.forward_stream);
         request_context->add_checkpoint("after_retry");
     }
 };
@@ -448,6 +527,7 @@ proxy_t::proxy_t(context_t& context, asio::io_service& loop, peers_t& peers, con
     peers(peers),
     app_name(name.substr(sizeof("virtual::") - 1)),
     balancer(make_balancer(args, extra)),
+    buffer_capacity(args.as_object().at("buffer_capacity_kb", 10240U).as_uint()),
     logger(context.log(name))
 {
     COCAINE_LOG_DEBUG(logger, "created proxy for app {}", app_name);
