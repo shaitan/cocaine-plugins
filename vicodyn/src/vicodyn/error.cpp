@@ -18,8 +18,12 @@ public:
             return "vicodyn upstream has been disconnected";
         case vicodyn_errors::failed_to_retry_enqueue:
             return "vicodyn failed to retry enqueue";
-        case vicodyn_errors::failed_to_send_error_to_forward:
-            return "failed to send error to forward dispatch";
+        case vicodyn_errors::failed_to_handle_event_for_forward:
+            return "vicodyn failed to handle event from forward dispatch";
+        case vicodyn_errors::client_disconnected:
+            return "vicodyn client has been disconnected";
+        case vicodyn_errors::failed_to_handle_event_for_backward:
+            return "vicodyn failed to handle event from backward dispatch";
         default:
             return format("{}: {}", name(), code);
         }

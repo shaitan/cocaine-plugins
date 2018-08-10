@@ -12,8 +12,14 @@ enum class vicodyn_errors {
     /// Failed to retry enqueue
     failed_to_retry_enqueue,
 
-    /// Failed to send error to forward dispatch
-    failed_to_send_error_to_forward,
+    /// Failed to handle event for forward
+    failed_to_handle_event_for_forward,
+
+    /// Client has been disconnected
+    client_disconnected,
+
+    /// Failed to handle event for backward
+    failed_to_handle_event_for_backward,
 };
 
 auto vicodyn_category() -> const std::error_category&;
