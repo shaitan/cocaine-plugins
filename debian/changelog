@@ -1,3 +1,13 @@
+cocaine-plugins (0.12.14.68) unstable; urgency=low
+
+  * refact: Data structs in vicodyn dispatcher
+  * refact: Do not buffer body if response to upstream started
+  * feat: Choose peer by average elapsed time for request
+  * feat: Limit buffer size by config in vicodyn
+  * feat: Retry on network error in vicodyn
+
+ -- Artem Selishchev <arselishev@gmail.com>  Mon, 13 Aug 2018 19:57:39 +0300
+
 cocaine-plugins (0.12.14.67) unstable; urgency=low
 
   * Refactored: keep log as unique_ptr in node
