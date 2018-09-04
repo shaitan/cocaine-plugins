@@ -1,3 +1,9 @@
+cocaine-plugins (0.12.14.78) unstable; urgency=low
+
+  * feat: Vicodyn info
+
+ -- Artem Selishchev <arselishev@gmail.com>  Tue, 04 Sep 2018 17:57:36 +0300
+
 cocaine-plugins (0.12.14.77) unstable; urgency=medium
 
   * fix: Fading of influence of request duration in weight of peer by time
