@@ -15,7 +15,7 @@ struct vicodyn {
             return "info";
         }
 
-        typedef boost::mpl::list<>::type argument_type;
+        typedef boost::mpl::list<optional<std::string>>::type argument_type;
 
         typedef option_of<
             dynamic_t

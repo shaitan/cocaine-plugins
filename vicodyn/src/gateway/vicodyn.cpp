@@ -42,8 +42,63 @@ struct dynamic_constructor<vicodyn::peers_t::peer_data_t> {
         data["last_active"] = std::chrono::system_clock::to_time_t(from.peer->last_active());
         data["uuid"] = from.peer->uuid();
         data["system_weight"] = from.system_weight.load();
-        to = detail::dynamic::incomplete_wrapper<dynamic_t::object_t>();
-        boost::get<detail::dynamic::incomplete_wrapper<dynamic_t::object_t>>(to).set(std::move(data));
+        dynamic_constructor<dynamic_t::object_t>::convert(data, to);
+    }
+};
+
+struct peer_stats_t {
+    std::size_t count;
+    std::size_t banned;
+
+    peer_stats_t(std::size_t count = 0, std::size_t banned = 0)
+        : count(count)
+        , banned(banned) {
+    }
+
+    auto operator+=(const peer_stats_t& other) -> peer_stats_t& {
+        count += other.count;
+        banned += other.banned;
+        return *this;
+    }
+};
+
+template<>
+struct dynamic_constructor<peer_stats_t> {
+    static const bool enable = true;
+
+    static inline
+    void
+    convert(const peer_stats_t& from, dynamic_t::value_t& to) {
+        dynamic_t::object_t data;
+        data["peers"] = from.count;
+        data["banned"] = from.banned;
+        dynamic_constructor<dynamic_t::object_t>::convert(data, to);
+    }
+};
+
+struct app_stats_t {
+    std::unordered_map<std::string, peer_stats_t> clusters;
+
+    auto total() const -> peer_stats_t {
+        peer_stats_t result;
+        for (const auto& cluster : clusters) {
+            result += cluster.second;
+        }
+        return result;
+    }
+};
+
+template<>
+struct dynamic_constructor<app_stats_t> {
+    static const bool enable = true;
+
+    static inline
+    void
+    convert(const app_stats_t& from, dynamic_t::value_t& to) {
+        dynamic_t::object_t data;
+        data["clusters"] = from.clusters;
+        data["total"] = from.total();
+        dynamic_constructor<dynamic_t::object_t>::convert(data, to);
     }
 };
 
@@ -95,7 +150,7 @@ vicodyn_t::vicodyn_t(context_t& _context, const std::string& _local_uuid, const 
     create_wrapped_gateway();
     COCAINE_LOG_INFO(logger, "created wrapped gateway");
     auto d = std::make_unique<dispatch<io::vicodyn_tag>>("vicodyn");
-    d->on<io::vicodyn::peers>([&](std::string uuid) {
+    d->on<io::vicodyn::peers>([&](std::string&& uuid) {
         dynamic_t result = dynamic_t::empty_object;
         dynamic_t& peers_result = result.as_object()["peers"];
 
@@ -106,13 +161,13 @@ vicodyn_t::vicodyn_t(context_t& _context, const std::string& _local_uuid, const 
                 auto it = data.peers.find(uuid);
                 if(it != data.peers.end()) {
                     peers_result = dynamic_t::empty_object;
-                    peers_result.as_object()[uuid] = it->second;
+                    peers_result.as_object()[it->first] = it->second;
                 }
             }
         });
         return result;
     });
-    d->on<io::vicodyn::apps>([&](std::string app) {
+    d->on<io::vicodyn::apps>([&](std::string&& app) {
         dynamic_t result = dynamic_t::empty_object;
         dynamic_t& app_result = result.as_object()["apps"];
         peers.apply_shared([&](const vicodyn::peers_t::data_t& data) mutable {
@@ -151,15 +206,54 @@ vicodyn_t::vicodyn_t(context_t& _context, const std::string& _local_uuid, const 
             } else {
                 auto it = data.apps.find(app);
                 if(it != data.apps.end()) {
-                    app_result = dynamic_t::empty_object;
                     app_result.as_object()[it->first] = convert_app_services(it->second);
                 }
             }
         });
         return result;
     });
-    d->on<io::vicodyn::info>([]() -> dynamic_t {
-        throw error_t("not implemented");
+    d->on<io::vicodyn::info>([&](std::string&& app) -> dynamic_t {
+        dynamic_t result = dynamic_t::empty_object;
+        dynamic_t &apps_result = result.as_object()["apps"];
+        peers.apply_shared([&](const vicodyn::peers_t::data_t &data) mutable {
+            auto get_app_stats = [&](const vicodyn::peers_t::app_services_t& from) {
+                app_stats_t app_stats;
+                for (const auto& app_service : from) {
+                    auto peer_it = data.peers.find(app_service.first);
+                    if (peer_it == data.peers.end()) {
+                        continue;
+                    }
+                    app_stats.clusters[peer_it->second.peer->x_cocaine_cluster()] += peer_stats_t{
+                            peer_it->second.peer->connected(),
+                            app_service.second.banned()
+                    };
+                }
+                return app_stats;
+            };
+
+            if(app.empty()) {
+                for (const auto& app : data.apps) {
+                    apps_result.as_object()[app.first] = get_app_stats(app.second);
+                }
+                std::unordered_map<std::string, std::size_t> clusters;
+                std::size_t total = 0;
+                for (const auto& peer : data.peers) {
+                    const auto connected = peer.second.peer->connected();
+                    clusters[peer.second.peer->x_cocaine_cluster()] += connected;
+                    total += connected;
+                }
+                dynamic_t &total_result = result.as_object()["total"];
+                total_result.as_object()["clusters"] = clusters;
+                total_result.as_object()["peers"] = total;
+                total_result.as_object()["apps"] = data.apps.size();
+            } else {
+                auto it = data.apps.find(app);
+                if(it != data.apps.end()) {
+                    apps_result.as_object()[it->first] = get_app_stats(it->second);
+                }
+            }
+        });
+        return result;
     });
     COCAINE_LOG_INFO(logger, "created dispatch");
     auto actor = std::make_unique<tcp_actor_t>(context, std::move(d));
