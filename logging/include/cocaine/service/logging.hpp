@@ -33,6 +33,7 @@
 namespace cocaine {
 namespace logging {
 class metafilter_t;
+class truncator_t;
 }
 }
 
@@ -55,12 +56,16 @@ private:
 
 class named_logging_t : public dispatch<io::named_log_tag> {
 public:
-    named_logging_t(logging::logger_t& log, std::string name, std::shared_ptr<logging::metafilter_t> filter);
+    named_logging_t(logging::logger_t& log,
+                    std::string name,
+                    std::shared_ptr<logging::metafilter_t> filter,
+                    const logging::truncator_t& truncator);
 
 private:
     logging::logger_t& log;
     std::string backend;
     std::shared_ptr<logging::metafilter_t> filter;
+    const logging::truncator_t& truncator;
 };
 }
 }  // namespace cocaine::service

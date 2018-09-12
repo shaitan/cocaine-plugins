@@ -18,8 +18,9 @@
     along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "cocaine/logging/metafilter.hpp"
 #include "cocaine/logging/filter.hpp"
+#include "cocaine/logging/metafilter.hpp"
+#include "cocaine/logging/truncator.hpp"
 
 #include "cocaine/traits/attributes.hpp"
 #include "cocaine/traits/dynamic.hpp"
@@ -78,27 +79,41 @@ auto get_root_logger(context_t& context, const dynamic_t& service_args) -> bh::r
     return registry->builder<blackhole::config::json_t>(stream).build(backend);
 }
 
-auto emit_ack(std::shared_ptr<metafilter_t> filter, const std::string& backend, logger_t& log, unsigned int severity,
-              const std::string& message, const attributes_t& attributes) -> bool
-{
+auto emit_ack(std::shared_ptr<metafilter_t> filter,
+              const truncator_t& truncator,
+              const std::string& backend,
+              logger_t& log,
+              unsigned int severity,
+              std::string&& message,
+              attributes_t&& attributes) -> bool {
     blackhole::attribute_list attribute_list;
     for (const auto& attribute : attributes) {
         attribute_list.emplace_back(attribute);
     }
-    attribute_list.emplace_back("source", backend);
 
     blackhole::attribute_pack attribute_pack({attribute_list});
     if (filter->apply(severity, attribute_pack) == logging::filter_result_t::reject) {
         return false;
     }
+
+    truncator.truncate_message(message);
+    truncator.truncate_attribute_count(attribute_list);
+    truncator.truncate_attributes(attributes);
+
+    attribute_list.emplace_back("source", backend);
+
     log.log(blackhole::severity_t(severity), message, attribute_pack);
     return true;
 }
 
-auto emit(std::shared_ptr<metafilter_t> filter, const std::string& backend, logging::logger_t& log,
-          unsigned int severity, const std::string& message, const logging::attributes_t& attributes) -> void
-{
-    emit_ack(filter, backend, log, severity, message, attributes);
+auto emit(std::shared_ptr<metafilter_t> filter,
+          const truncator_t& truncator,
+          const std::string& backend,
+          logging::logger_t& log,
+          unsigned int severity,
+          std::string&& message,
+          logging::attributes_t&& attributes) -> void {
+    emit_ack(filter, truncator, backend, log, severity, std::move(message), std::move(attributes));
 }
 
 auto now() -> uint64_t {
@@ -108,6 +123,7 @@ auto now() -> uint64_t {
 
 struct logging_v2_t::impl_t : public std::enable_shared_from_this<logging_v2_t::impl_t> {
     using filter_t = logging::filter_t;
+    using truncator_t = logging::truncator_t;
 
     // propagate filter_t typedefs for simplicity
     using id_t = filter_t::id_t;
@@ -128,6 +144,7 @@ struct logging_v2_t::impl_t : public std::enable_shared_from_this<logging_v2_t::
         root_logger(new bh::root_logger_t(get_root_logger(context, config))),
         logger(std::unique_ptr<logging::logger_t>(new bh::wrapper_t(*root_logger, {}))),
         signal_dispatcher(std::make_shared<dispatch<io::context_tag>>("logging_signals")),
+        truncator(config.as_object().at("truncate", dynamic_t::empty_object)),
         generator(std::random_device()()),
         unicorn(api::unicorn(context, "core")),
         filter_unicorn_path(config.as_object().at("unicorn_path", "/cocaine/logging_v2/filters").as_string()),
@@ -506,6 +523,7 @@ struct logging_v2_t::impl_t : public std::enable_shared_from_this<logging_v2_t::
 
     using metafilters_t = radix_tree<std::string, std::shared_ptr<logging::metafilter_t>>;
     synchronized<metafilters_t> metafilters;
+    const truncator_t truncator;
     mutable synchronized<std::mt19937_64> generator;
     api::unicorn_ptr unicorn;
     std::atomic_ulong scope_counter;
@@ -533,16 +551,17 @@ logging_v2_t::logging_v2_t(context_t& context, asio::io_service& asio, const std
     d = std::make_shared<impl_t>(context, asio, conf);
     d->load_filters();
 
-    on<io::base_log::emit>([&](uint severity, const std::string& backend, const std::string& message,
-                               const attributes_t& attributes)
-    {
-        emit(d->find_metafilter(backend), backend, d->logger, severity, message, attributes);
+    on<io::base_log::emit>([&](uint severity, const std::string& backend, std::string&& message,
+            attributes_t&& attributes) {
+        emit(d->find_metafilter(backend), d->truncator, backend, d->logger, severity, std::move(message),
+                std::move(attributes));
     });
 
-    on<io::base_log::emit_ack>([&](uint severity, const std::string& backend, const std::string& message,
-                                   const attributes_t& attributes)
+    on<io::base_log::emit_ack>([&](uint severity, const std::string& backend, std::string&& message,
+            attributes_t&& attributes)
     {
-        return emit_ack(d->find_metafilter(backend), backend, d->logger, severity, message, attributes);
+        return emit_ack(d->find_metafilter(backend), d->truncator, backend, d->logger, severity, std::move(message),
+                std::move(attributes));
     });
 
     using get = io::base_log::get;
@@ -550,7 +569,8 @@ logging_v2_t::logging_v2_t(context_t& context, asio::io_service& asio, const std
     on<get>([&](const hpack::headers_t&, get_slot_t::tuple_type&& args, get_slot_t::upstream_type&&){
         auto mf_name = std::get<0>(args);
         auto metafilter = d->find_metafilter(mf_name);
-        auto dispatch = std::make_shared<named_logging_t>(d->logger, std::move(mf_name), std::move(metafilter));
+        auto dispatch = std::make_shared<named_logging_t>(d->logger, std::move(mf_name), std::move(metafilter),
+                d->truncator);
         return get_slot_t::result_type(std::move(dispatch));
     });
 
@@ -567,19 +587,20 @@ logging_v2_t::logging_v2_t(context_t& context, asio::io_service& asio, const std
 
 named_logging_t::named_logging_t(logging::logger_t& _log,
                                  std::string _name,
-                                 std::shared_ptr<logging::metafilter_t> _filter) :
+                                 std::shared_ptr<logging::metafilter_t> _filter,
+                                 const logging::truncator_t& _truncator) :
         dispatch<io::named_log_tag>(format("named_logging/{}", _name)),
         log(_log),
         backend(std::move(_name)),
-        filter(std::move(_filter))
-{
+        filter(std::move(_filter)),
+        truncator(_truncator) {
     using emit_event = io::named_log::emit;
     using emit_slot_t = io::basic_slot<emit_event>;
     on<emit_event>([&](const hpack::headers_t&, emit_slot_t::tuple_type&& args, emit_slot_t::upstream_type&&) {
         auto severity = std::get<0>(args);
         auto& message = std::get<1>(args);
         auto& attributes = std::get<2>(args);
-        emit(filter, backend, log, severity, message, attributes);
+        emit(filter, truncator, backend, log, severity, std::move(message), std::move(attributes));
         return emit_slot_t::result_type(boost::none);
     });
 
@@ -590,7 +611,7 @@ named_logging_t::named_logging_t(logging::logger_t& _log,
         auto severity = std::get<0>(args);
         auto& message = std::get<1>(args);
         auto& attributes = std::get<2>(args);
-        auto result = emit_ack(filter, backend, log, severity, message, attributes);
+        auto result = emit_ack(filter, truncator, backend, log, severity, std::move(message), std::move(attributes));
         using chunk_event = io::protocol<io::stream_of<bool>::tag>::scope::chunk;
         upstream.template send<chunk_event>(result);
         return ack_slot_t::result_type(boost::none);

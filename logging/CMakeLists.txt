@@ -8,6 +8,7 @@ ADD_LIBRARY(logging MODULE
     src/module.cpp
     src/logging/filter.cpp
     src/logging/metafilter.cpp
+    src/logging/truncator.cpp
 )
 
 TARGET_LINK_LIBRARIES(logging
