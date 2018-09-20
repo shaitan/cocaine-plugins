@@ -101,7 +101,7 @@ set(BUILD_FLAGS "${BUILD_FLAGS} -Wold-style-cast")
 set(BUILD_FLAGS "${BUILD_FLAGS} -Woverloaded-virtual")
 set(BUILD_FLAGS "${BUILD_FLAGS} -Wswitch")
 set(BUILD_FLAGS "${BUILD_FLAGS} -Wunreachable-code")
-set(BUILD_FLAGS "${BUILD_FLAGS} -pedantic -pedantic-errors")
+set(BUILD_FLAGS "${BUILD_FLAGS} -pedantic")
 
 set_target_properties(${PLUGIN_NAME} PROPERTIES
     COMPILE_FLAGS "${BUILD_FLAGS}"
