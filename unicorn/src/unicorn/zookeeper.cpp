@@ -485,15 +485,18 @@ public:
         }
 
         auto on_abort() -> void override {
-            if(parent && !parent->created_sequence_path.empty()) {
+            auto owned_parent = std::move(parent);
+
+            if(owned_parent && !owned_parent->created_sequence_path.empty()) {
                 try {
-                    parent->parent.zk.del(parent->created_sequence_path, parent->shared_from_this());
+                    owned_parent->parent.zk.del(owned_parent->created_sequence_path, owned_parent);
                 } catch(const std::system_error& e) {
-                    COCAINE_LOG_ERROR(parent->parent.log, "can not delete lock on {} - {}, reconnecting as a last resort",
-                                      parent->created_sequence_path, error::to_string(e));
-                    parent->parent.zk.reconnect();
+                    COCAINE_LOG_ERROR(owned_parent->parent.log,
+                                      "can not delete lock on {} - {}, reconnecting as a last resort",
+                                      owned_parent->created_sequence_path,
+                                      error::to_string(e));
+                    owned_parent->parent.zk.reconnect();
                 }
-                parent = nullptr;
             }
         }
     };
