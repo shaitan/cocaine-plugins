@@ -192,13 +192,62 @@ struct metrics_load_t {
     apply();
 };
 
+
+// All async methods should capture shared_from_this()
+class connection_t : public std::enable_shared_from_this<connection_t> {
+    context_t& context_;
+    std::unique_ptr<logging::logger_t> log_;
+
+    std::unique_ptr<tcp::socket> socket_;
+    asio::deadline_timer connect_timer_;
+
+public:
+    using async_completion = std::function<void(const std::error_code&, std::shared_ptr<session_t>)>;
+
+    connection_t(context_t& context, const std::string& name, asio::io_service& io)
+        : context_(context)
+        , log_(context.log("universal_isolate/connection/" + name))
+        , socket_(std::make_unique<tcp::socket>(io))
+        , connect_timer_(io)
+    {}
+
+    auto
+    async_connect(tcp::endpoint endpoint, boost::posix_time::milliseconds timeout, async_completion&& callback) -> void
+    {
+        COCAINE_LOG_INFO(
+            log_, "connecting to external isolation daemon at {}", boost::lexical_cast<std::string>(endpoint));
+
+        const auto self = shared_from_this();
+
+        connect_timer_.expires_from_now(timeout);
+        connect_timer_.async_wait([self](const std::error_code& ec) {
+            COCAINE_LOG_INFO(self->log_, "timeout connecting to isolate daemon, ec = {}", ec);
+
+            // Socket could be moved out in `async_connect` handler, if not yet,
+            // or on any timer error just close it.
+            if (self->socket_) {
+                self->socket_->close();
+            }
+        });
+
+        socket_->async_connect(std::move(endpoint), [self, callback=std::move(callback)](const std::error_code& ec) {
+            std::shared_ptr<session_t> session;
+
+            if (self->socket_->is_open() && !ec) {
+                session = self->context_.engine().attach(std::move(self->socket_), nullptr);
+            }
+
+            self->connect_timer_.cancel();
+            callback(ec, std::move(session));
+        });
+    }
+};
+
 struct external_t::inner_t :
     public std::enable_shared_from_this<inner_t>
 {
     context_t& context;
     asio::io_service& io_context;
-    std::unique_ptr<tcp::socket> socket;
-    asio::deadline_timer connect_timer;
     std::shared_ptr<session_t> session;
     const std::string name;
     dynamic_t args;
@@ -206,27 +255,31 @@ struct external_t::inner_t :
     std::atomic<id_t> cur_id;
     std::shared_ptr<dispatch<io::context_tag>> signal_dispatch;
     bool prepared;
-    bool connecting;
 
     std::chrono::time_point<std::chrono::system_clock> last_failed_connect_time;
     std::chrono::milliseconds seal_time;
+
     static constexpr std::chrono::milliseconds min_seal_time {1000ul};
     static constexpr std::chrono::milliseconds max_seal_time {1000000ul};
 
     std::vector<std::shared_ptr<spool_load_t>> spool_queue;
     std::vector<std::shared_ptr<spawn_load_t>> spawn_queue;
 
+    std::atomic_flag connecting = ATOMIC_FLAG_INIT;
+
+    struct flag_sentry_t {
+        std::atomic_flag& flag;
+        ~flag_sentry_t() { flag.clear(); }
+    };
+
     inner_t(context_t& _context, asio::io_service& _io_context, const std::string& _name, const std::string& type, const dynamic_t& _args) :
         context(_context),
         io_context(_io_context),
-        socket(),
-        connect_timer(io_context),
         name(_name),
         args(_args),
         log(context.log("universal_isolate/"+_name)),
         signal_dispatch(std::make_shared<dispatch<io::context_tag>>("universal_isolate_signal")),
         prepared(false),
-        connecting(false),
         last_failed_connect_time(),
         seal_time(min_seal_time)
     {
@@ -241,60 +294,66 @@ struct external_t::inner_t :
     }
 
     void connect() {
-        if(connecting) {
-            COCAINE_LOG_INFO(log, "connection to isolate daemon is already in progress");
-            return;
-        }
-        if(std::chrono::system_clock::now() < (last_failed_connect_time + seal_time)) {
+        if (std::chrono::system_clock::now() < (last_failed_connect_time + seal_time)) {
             COCAINE_LOG_WARNING(log, "connection to isolate daemon is sealed");
             return;
         }
-        connecting = true;
-        socket.reset(new asio::ip::tcp::socket(io_context));
-        if(session) {
+
+        if (connecting.test_and_set()) {
+            COCAINE_LOG_INFO(log, "connection to isolate daemon is already in progress");
+            return;
+        }
+
+        if (session) {
             session->detach(std::error_code());
             session = nullptr;
         }
-        auto ep = args.as_object().at("external_isolation_endpoint", dynamic_t::empty_object).as_object();
+
+        const auto ep = args.as_object().at("external_isolation_endpoint", dynamic_t::empty_object).as_object();
         tcp::endpoint endpoint(
             asio::ip::address::from_string(ep.at("host", "127.0.0.1").as_string()),
             static_cast<unsigned short>(ep.at("port", 29042u).as_uint())
         );
 
-        auto connect_timeout_ms = args.as_object().at("connect_timeout_ms", 5000u).as_uint();
+        const auto connect_timeout_ms = args.as_object().at("connect_timeout_ms", 5000u).as_uint();
+        boost::posix_time::milliseconds timeout(connect_timeout_ms);
 
-        COCAINE_LOG_INFO(log, "connecting to external isolation daemon to {}", boost::lexical_cast<std::string>(endpoint));
-        auto self_shared = shared_from_this();
+        auto self = shared_from_this();
 
-        connect_timer.expires_from_now(boost::posix_time::milliseconds(connect_timeout_ms));
-        connect_timer.async_wait([=](const std::error_code& ec){
-            if(!ec) {
-                self_shared->socket->cancel();
+        const auto connection = std::make_shared<connection_t>(context, name, io_context);
+        connection->async_connect(
+            std::move(endpoint),
+            std::move(timeout),
+            [self](const std::error_code& ec, std::shared_ptr<session_t> session) {
+                flag_sentry_t sentry{self->connecting};
+
+                if (session) {
+                    COCAINE_LOG_INFO(self->log, "connected to isolation daemon");
+                    self->session = std::move(session);
+                    self->on_ready();
+                } else {
+                    COCAINE_LOG_WARNING(
+                        self->log,
+                        "could not connect to external isolation daemon - {}",
+                        ec ? ec.message() : "timeout"
+                    );
+                    self->on_connection_fail(ec);
+                }
             }
-        });
-
-        socket->async_connect(endpoint, [=](const std::error_code& ec) {
-            connecting = false;
-            if (connect_timer.cancel() && !ec) {
-                COCAINE_LOG_INFO(log, "connected to isolation daemon");
-                session = context.engine().attach(std::move(socket), nullptr);
-                self_shared->on_ready();
-            } else {
-                socket.reset(nullptr);
-                COCAINE_LOG_WARNING(log, "could not connect to external isolation daemon - {}", ec.message());
-                on_fail(ec);
-            }
-        });
+        );
     }
 
-    void on_fail(const std::error_code& ec) {
+    void on_connection_fail(const std::error_code& ec) {
         last_failed_connect_time = std::chrono::system_clock::now();
         seal_time = std::min(seal_time * 2, max_seal_time);
+
+        COCAINE_LOG_INFO(log, "aborting {} queued spool requests", spool_queue.size());
         for (auto& load: spool_queue) {
             load->handle->on_abort(ec, "could not connect to external dispatch");
         }
         spool_queue.clear();
-        COCAINE_LOG_INFO(log, "processing {} queued spawn requests", spawn_queue.size());
+
+        COCAINE_LOG_INFO(log, "terminating {} queued spawn requests", spawn_queue.size());
         for(auto& load: spawn_queue) {
             load->handle->on_terminate(ec, "could not connect to external dispatch");
         }
