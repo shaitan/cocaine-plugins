@@ -1,3 +1,14 @@
+cocaine-plugins (0.12.14.79) unstable; urgency=medium
+
+  * fix: external connect race
+  * chore(node/CMakeLists.txt): remove "-pedantic-errors"
+  * fix: Fix cyclic references in unicorn
+  * feat: update libmetrics to 3.2.0-1
+  * fix: Do not modificate ewma of timings in vicodyn during get
+  * feat: Truncate log records
+
+ -- Artem Selishchev <arselishev@gmail.com>  Tue, 25 Sep 2018 18:50:14 +0300
+
 cocaine-plugins (0.12.14.78) unstable; urgency=low
 
   * feat: Vicodyn info
