@@ -1,3 +1,9 @@
+cocaine-plugins (0.12.14.80) unstable; urgency=low
+
+  * fix: Fix crash during stop of vicodyn
+
+ -- Artem Selishchev <arselishev@gmail.com>  Fri, 19 Oct 2018 20:29:06 +0300
+
 cocaine-plugins (0.12.14.79) unstable; urgency=medium
 
   * fix: external connect race
