@@ -1,3 +1,9 @@
+cocaine-plugins (0.12.14.81) unstable; urgency=medium
+
+  * fix: Fix crash in vicodyn when proxy destructs earlier than dispatcher
+
+ -- Artem Selishchev <arselishev@gmail.com>  Fri, 02 Nov 2018 16:52:27 +0300
+
 cocaine-plugins (0.12.14.80) unstable; urgency=low
 
   * fix: Fix crash during stop of vicodyn
