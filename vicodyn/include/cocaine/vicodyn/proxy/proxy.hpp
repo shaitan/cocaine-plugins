@@ -40,7 +40,7 @@ private:
     std::string app_name;
     api::vicodyn::balancer_ptr balancer;
     const std::size_t buffer_capacity;
-    const std::unique_ptr<logging::logger_t> logger;
+    const std::shared_ptr<logging::logger_t> logger;
 };
 
 } // namespace vicodyn

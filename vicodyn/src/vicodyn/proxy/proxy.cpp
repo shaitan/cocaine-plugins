@@ -14,8 +14,8 @@ namespace vicodyn {
 namespace ph = std::placeholders;
 
 class vicodyn_dispatch_t : public std::enable_shared_from_this<vicodyn_dispatch_t> {
-    logging::logger_t& logger_;
-    std::shared_ptr<request_context_t> request_context_;
+    const std::shared_ptr<logging::logger_t> logger_;
+    const std::shared_ptr<request_context_t> request_context_;
 
     safe_stream_t backward_stream_;
     discardable_dispatch_t forward_dispatch_;
@@ -24,7 +24,7 @@ class vicodyn_dispatch_t : public std::enable_shared_from_this<vicodyn_dispatch_
 
 public:
     vicodyn_dispatch_t(proxy_t& proxy, const std::string& name, upstream<app_tag_t> b_stream)
-        : logger_(*proxy.logger)
+        : logger_(proxy.logger)
         , request_context_(std::make_shared<request_context_t>(*proxy.logger))
         , backward_stream_(std::move(b_stream))
         , forward_dispatch_(name + "/forward")
