@@ -224,14 +224,17 @@ auto unicorn_cluster_t::subscriber_t::on_node(std::string uuid, std::future<resp
             auto result = future.get();
             if(!result.exists()) {
                 terminate("node was removed");
+                return;
             }
             auto endpoints = result.value().to<std::vector<asio::ip::tcp::endpoint>>();
             if(endpoints.empty()) {
                 terminate("node has empty endpoints");
+                return;
             }
             auto& subscription = subscriptions[uuid];
             if(!subscription.endpoints.empty() && subscription.endpoints != endpoints) {
                 terminate("received endpoints different from stored");
+                return;
             }
             subscription.endpoints = std::move(endpoints);
             parent.locator.link_node(uuid, subscription.endpoints);
