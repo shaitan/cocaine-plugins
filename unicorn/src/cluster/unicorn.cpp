@@ -214,7 +214,7 @@ auto unicorn_cluster_t::subscriber_t::on_node(std::string uuid, std::future<resp
             COCAINE_LOG_WARNING(parent.log, "node {} subscription failed - {}", uuid, reason);
             parent.locator.drop_node(uuid);
             auto it = subscriptions.find(uuid);
-            if (it == subscriptions.end()) {
+            if (it != subscriptions.end()) {
                 scopes_to_destroy.emplace_back(std::move(it->second.scope));
                 subscriptions.erase(it);
             }
