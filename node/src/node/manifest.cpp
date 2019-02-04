@@ -42,6 +42,8 @@ manifest_t::manifest_t(context_t& context, const std::string& name_):
         throw cocaine::error_t("environment should be a map of string -> string");
     }
 
+    extended_info = as_object().at("extended_info", dynamic_t::empty_object).as_object();
+
     if(as_object().find("slave") != as_object().end()) {
         executable = as_object().at("slave").as_string();
     } else {

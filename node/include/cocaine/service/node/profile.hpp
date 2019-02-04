@@ -31,7 +31,7 @@
 namespace cocaine {
 
 struct profile_t : cached<dynamic_t> {
-    profile_t(context_t& context, const std::string& name);
+    profile_t(context_t& context, const std::string& name, const cocaine::dynamic_t::object_t& extended_info);
 
     // The profile name.
     std::string name;

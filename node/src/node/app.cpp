@@ -657,7 +657,8 @@ app_t::app_t(context_t& context,
     work(std::make_unique<asio::io_service::work>(*loop)),
     thread(nullptr)
 {
-    const profile_t profile{context, profile_name};
+    manifest_t manifest{context, name};
+    const profile_t profile{context, profile_name, manifest.extended_info};
 
     isolate_ = context.repository().get<api::isolate_t>(
         profile.isolate.type,
@@ -670,7 +671,7 @@ app_t::app_t(context_t& context,
 
     state = std::make_shared<app_state_t>(
         context,
-        manifest_t(context, name),
+        std::move(manifest),
         profile,
         std::move(callback),
         isolate_,

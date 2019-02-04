@@ -27,7 +27,7 @@
 
 namespace cocaine {
 
-profile_t::profile_t(context_t& context, const std::string& name_):
+profile_t::profile_t(context_t& context, const std::string& name_, const cocaine::dynamic_t::object_t& extended_info):
     cached<dynamic_t>(context, "profiles", name_),
     name(name_)
 {
@@ -59,6 +59,7 @@ profile_t::profile_t(context_t& context, const std::string& name_):
 
     isolate.type = isolate_config.at("type", "process").as_string();
     isolate.args = isolate_config.at("args", dynamic_t::empty_object);
+    isolate.args.as_object()["extended_info"] = extended_info;
 
     // Validation
 

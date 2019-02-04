@@ -43,6 +43,9 @@ struct manifest_t : cached<dynamic_t> {
 
     // What to execute.
     std::string executable;
+
+    // Extended information.
+    cocaine::dynamic_t::object_t extended_info;
 };
 
 }  // namespace cocaine
