@@ -1,3 +1,9 @@
+cocaine-plugins (0.12.14.84) unstable; urgency=low
+
+  * Add "extended_info" for isolation engine from manifest.
+
+ -- Dmitriy Karpukhin <dmitriy.karpukhin@gmail.com>  Wed, 06 Feb 2019 16:04:26 +0000
+
 cocaine-plugins (0.12.14.83) unstable; urgency=low
 
   * unicorn: stop processing of incorrect announcement
