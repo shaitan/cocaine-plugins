@@ -70,7 +70,6 @@ private:
     using proxy_map_t = std::map<app_name_t, proxy_description_t>;
 
     auto create_wrapped_gateway() -> void;
-    auto cleanup(proxy_map_t& map, proxy_map_t::iterator it, const std::string uuid) -> proxy_map_t::iterator;
 
     context_t& context;
     dynamic_t::object_t locator_extra;
